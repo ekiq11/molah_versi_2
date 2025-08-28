@@ -74,7 +74,7 @@ class ReportSection extends StatelessWidget {
               case 1:
                 return _buildInfoCard(
                   title: 'HAFALAN',
-                  value: (santriData['jumlah_hafalan'] + 'Juz' ?? '0'),
+                  value: (santriData['jumlah_hafalan'] + 'Juz' ?? ' > 5 Juz'),
                   icon: Icons.menu_book,
                   iconColor: Colors.green[700]!,
                   cardColor: Colors.green[50]!,

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -202,12 +204,250 @@ class _PaymentConfirmationScreenState extends State<PaymentConfirmationScreen>
   }
 
   // FIXED: Improved WhatsApp launch method with better error handling
+  // FIXED: Improved WhatsApp launch method untuk release APK
+  // IMPROVED WhatsApp launch method dengan optimasi untuk release APK
   Future<void> _openWhatsApp() async {
     HapticFeedback.mediumImpact();
     setState(() {
       _isProcessing = true;
     });
 
+    try {
+      final phone = "6289693652230";
+      final message = _buildWhatsAppMessage();
+      final encodedMessage = Uri.encodeComponent(message);
+
+      // ✅ OPTIMIZED: Urutkan berdasarkan success rate di production
+      final List<Map<String, dynamic>> whatsappUrls = [
+        // 1. Native WhatsApp (highest success rate)
+        {
+          'url': 'whatsapp://send?phone=$phone&text=$encodedMessage',
+          'mode': LaunchMode.externalApplication,
+          'description': 'WhatsApp Native App',
+          'priority': 1,
+        },
+        // 2. wa.me (universal fallback)
+        {
+          'url': 'https://wa.me/$phone?text=$encodedMessage',
+          'mode': LaunchMode.externalApplication,
+          'description': 'WhatsApp Web (wa.me)',
+          'priority': 2,
+        },
+        // 3. Direct Android Intent (untuk kasus khusus)
+        {
+          'url':
+              'intent://send?phone=$phone&text=$encodedMessage#Intent;scheme=whatsapp;package=com.whatsapp;end',
+          'mode': LaunchMode.externalApplication,
+          'description': 'Android Intent Direct',
+          'priority': 3,
+        },
+        // 4. WhatsApp Business fallback
+        {
+          'url':
+              'intent://send?phone=$phone&text=$encodedMessage#Intent;scheme=whatsapp;package=com.whatsapp.w4b;end',
+          'mode': LaunchMode.externalApplication,
+          'description': 'WhatsApp Business',
+          'priority': 4,
+        },
+      ];
+
+      bool launched = false;
+      String lastError = '';
+      int successfulMethod = 0;
+
+      // ✅ IMPROVEMENT: Try dengan timeout per method
+      for (int i = 0; i < whatsappUrls.length; i++) {
+        final urlData = whatsappUrls[i];
+
+        try {
+          print('🔄 Attempting method ${i + 1}: ${urlData['description']}');
+
+          final uri = Uri.parse(urlData['url']);
+
+          // ✅ TIMEOUT: Berikan timeout 3 detik per attempt
+          launched = await launchUrl(uri, mode: urlData['mode']).timeout(
+            Duration(seconds: 3),
+            onTimeout: () {
+              throw TimeoutException('Timeout after 3 seconds');
+            },
+          );
+
+          if (launched) {
+            successfulMethod = i + 1;
+            print(
+              '✅ Success with method $successfulMethod: ${urlData['description']}',
+            );
+
+            // ✅ ANALYTICS: Log successful method untuk debugging
+            _logSuccessfulLaunchMethod(
+              successfulMethod,
+              urlData['description'],
+            );
+            break;
+          }
+        } catch (e) {
+          lastError = e.toString();
+          print('❌ Method ${i + 1} failed: $e');
+
+          // ✅ CONTINUE: Jangan break, coba method selanjutnya
+          if (i < whatsappUrls.length - 1) {
+            await Future.delayed(const Duration(milliseconds: 500));
+          }
+          continue;
+        }
+      }
+
+      if (launched) {
+        await Future.delayed(const Duration(milliseconds: 500));
+        _showSuccessDialog();
+      } else {
+        // ✅ FALLBACK: Offer manual method with better UX
+        _showManualFallbackDialog(message, phone, lastError);
+      }
+    } catch (e) {
+      print('❌ Critical error in _openWhatsApp: $e');
+      _showErrorDialog('Terjadi kesalahan sistem. Silakan coba manual.');
+    } finally {
+      setState(() {
+        _isProcessing = false;
+      });
+    }
+  }
+
+  // ✅ HELPER: Build WhatsApp message (DRY principle)
+  String _buildWhatsAppMessage() {
+    return "Halo, saya sudah melakukan transfer untuk top up saldo.\n\n"
+        "📋 *Detail Transfer:*\n"
+        "• NISN: ${widget.nisn}\n"
+        "• Nama Santri: ${widget.namaSantri}\n"
+        "• Jumlah Top Up: Rp ${_formatCurrency(widget.amount)}\n"
+        "• Kode Unik: $_nisnCode\n"
+        "• Total Transfer: Rp ${_formatCurrency(_totalAmount.toString())}\n"
+        "• Kode Transaksi: $_transactionCode\n\n"
+        "💰 *Detail Rekening Tujuan:*\n"
+        "• Bank: BSI (Bank Syariah Indonesia)\n"
+        "• No. Rekening: 7269288153\n"
+        "• Atas Nama: PESANTREN ISLAM ZAID BIN TSABIT\n\n"
+        "Tolong verifikasi pembayaran saya. Terima kasih.";
+  }
+
+  // ✅ ANALYTICS: Log successful method untuk improvement
+  void _logSuccessfulLaunchMethod(int methodIndex, String methodName) {
+    // Bisa integrate dengan Firebase Analytics atau logging service
+    print('📊 WhatsApp Launch Success: Method $methodIndex ($methodName)');
+
+    // Contoh untuk Firebase Analytics (uncomment jika menggunakan)
+    // FirebaseAnalytics.instance.logEvent(
+    //   name: 'whatsapp_launch_success',
+    //   parameters: {
+    //     'method_index': methodIndex,
+    //     'method_name': methodName,
+    //     'user_nisn': widget.nisn,
+    //   },
+    // );
+  }
+
+  // ✅ IMPROVED: Manual fallback dialog dengan better UX
+  void _showManualFallbackDialog(String message, String phone, String error) {
+    // Copy message to clipboard
+    Clipboard.setData(ClipboardData(text: message));
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 24),
+            SizedBox(width: 8),
+            Text(
+              'WhatsApp Manual',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Tidak dapat membuka WhatsApp otomatis. Pesan sudah disalin ke clipboard.',
+              style: TextStyle(fontSize: 14, height: 1.4),
+            ),
+            SizedBox(height: 16),
+            Container(
+              padding: EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Color(0xFFF3F4F6),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Langkah manual:',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  SizedBox(height: 8),
+                  Text('1. Buka WhatsApp'),
+                  Text('2. Cari: $phone'),
+                  Text('3. Paste pesan (sudah disalin)'),
+                  Text('4. Kirim pesan'),
+                ],
+              ),
+            ),
+            if (error.isNotEmpty) ...[
+              SizedBox(height: 12),
+              Text(
+                'Error: ${error.length > 100 ? error.substring(0, 100) + "..." : error}',
+                style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Batal'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              // ✅ TRY: Coba buka WhatsApp dengan method sederhana
+              _openWhatsAppSimple();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Color(0xFF25D366),
+              foregroundColor: Colors.white,
+            ),
+            child: Text('Coba Lagi'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ✅ SIMPLE: Method sederhana sebagai last resort
+  Future<void> _openWhatsAppSimple() async {
+    try {
+      final Uri uri = Uri.parse('whatsapp://');
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (e) {
+      // ✅ FINAL FALLBACK: Buka Play Store
+      try {
+        final Uri playStoreUri = Uri.parse(
+          'https://play.google.com/store/apps/details?id=com.whatsapp',
+        );
+        await launchUrl(playStoreUri, mode: LaunchMode.externalApplication);
+      } catch (e) {
+        print('All WhatsApp launch methods failed: $e');
+      }
+    }
+  }
+
+  // ✅ TAMBAHAN: Method alternatif menggunakan Android Intent (khusus untuk Android)
+  Future<void> _openWhatsAppAndroidIntent() async {
     try {
       final phone = "6289693652230";
       final message =
@@ -225,53 +465,16 @@ class _PaymentConfirmationScreenState extends State<PaymentConfirmationScreen>
           "• Atas Nama: PESANTREN ISLAM ZAID BIN TSABIT\n\n"
           "Tolong verifikasi pembayaran saya. Terima kasih.";
 
-      final encodedMessage = Uri.encodeComponent(message);
+      // Gunakan Android Intent langsung
+      final intentUrl =
+          'intent://send?phone=$phone&text=${Uri.encodeComponent(message)}#Intent;scheme=whatsapp;package=com.whatsapp;end';
 
-      // ✅ Hapus spasi berlebih dan gunakan format yang benar
-      final List<String> whatsappUrls = [
-        'whatsapp://send?phone=$phone&text=$encodedMessage', // Aplikasi lokal
-        'https://wa.me/$phone?text=$encodedMessage', // Web WhatsApp (tanpa spasi!)
-        'https://api.whatsapp.com/send?phone=$phone&text=$encodedMessage',
-      ];
-
-      bool launched = false;
-
-      for (final urlString in whatsappUrls) {
-        try {
-          final uri = Uri.parse(urlString);
-
-          if (await canLaunchUrl(uri)) {
-            launched = await launchUrl(
-              uri,
-              mode: LaunchMode.externalApplication,
-            );
-            if (launched) break;
-          }
-        } catch (e) {
-          print('Gagal membuka: $urlString, Error: $e');
-          continue;
-        }
-      }
-
-      if (launched) {
-        await Future.delayed(const Duration(milliseconds: 500));
-        _showSuccessDialog();
-      } else {
-        throw 'Tidak dapat membuka WhatsApp. Pastikan aplikasi terinstall.';
-      }
+      final uri = Uri.parse(intentUrl);
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
     } catch (e) {
-      print('Error opening WhatsApp: $e');
-      _showErrorDialog(
-        'Gagal membuka WhatsApp. Silakan:\n\n'
-        '1. Pastikan WhatsApp sudah terinstall\n'
-        '2. Coba restart aplikasi\n'
-        '3. Hubungi bendahara secara manual\n\n'
-        'Error: ${e.toString()}',
-      );
-    } finally {
-      setState(() {
-        _isProcessing = false;
-      });
+      print('Android Intent failed: $e');
+      // Fallback ke method lain
+      _openWhatsAppManual();
     }
   }
 

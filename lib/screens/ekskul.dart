@@ -597,7 +597,14 @@ Generated: ${DateTime.now().toString().split('.')[0]}
     return Scaffold(
       backgroundColor: Colors.grey[50],
       appBar: AppBar(
-        title: Text('Riwayat Pembayaran Ekskul'),
+        title: Text(
+          'Pembayaran Ekskul',
+          style: TextStyle(
+            color: Colors.grey[800],
+            fontWeight: FontWeight.w600,
+            fontSize: 18,
+          ),
+        ),
         backgroundColor: Colors.white,
         foregroundColor: Colors.black87,
         elevation: 1,

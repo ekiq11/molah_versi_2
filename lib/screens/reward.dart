@@ -1,3 +1,5 @@
+// ignore_for_file: deprecated_member_use
+
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:csv/csv.dart';
@@ -1388,14 +1390,14 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
       appBar: AppBar(
         backgroundColor: Color(0xFFF8F9FE),
         elevation: 0,
-        leading: IconButton(
-          icon: Icon(
-            Icons.arrow_back_ios_new_rounded,
-            color: Colors.grey[700],
-            size: 20,
-          ),
-          onPressed: () => Navigator.pop(context),
-        ),
+        // leading: IconButton(
+        //   icon: Icon(
+        //     Icons.arrow_back_ios_new_rounded,
+        //     color: Colors.grey[700],
+        //     size: 20,
+        //   ),
+        //   onPressed: () => Navigator.pop(context),
+        // ),
         centerTitle: true,
         title: Text(
           'Reward & Pelanggaran',

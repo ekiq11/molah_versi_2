@@ -413,7 +413,9 @@ class _LoginScreenState extends State<LoginScreen> {
                       height: 80,
                       decoration: BoxDecoration(
                         color: Colors.white,
-                        borderRadius: BorderRadius.circular(40),
+                        borderRadius: BorderRadius.circular(
+                          40,
+                        ), // Membuat lingkaran
                         boxShadow: const [
                           BoxShadow(
                             color: Colors.black26,
@@ -422,10 +424,15 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                         ],
                       ),
-                      child: const Icon(
-                        Icons.school,
-                        size: 40,
-                        color: Color(0xFFE53E3E),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(
+                          40,
+                        ), // Agar gambar tidak keluar dari lingkaran
+                        child: Image(
+                          image: AssetImage('assets/img/molah.png'),
+                          fit: BoxFit
+                              .contain, // Menjaga proporsi gambar, tidak terdistorsi
+                        ),
                       ),
                     ),
                   ),
@@ -440,7 +447,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
                   const Text(
-                    'Monitoring Santri',
+                    'Aplikasi Monitoring Santri',
                     style: TextStyle(fontSize: 16, color: Colors.white70),
                   ),
                   const SizedBox(height: 40),
@@ -634,7 +641,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 20),
                   const Text(
-                    'MOLAH v1.0.0 - Powered by Pizab',
+                    'MOLAH v2.0.0 - Powered by Pizab',
                     style: TextStyle(fontSize: 10, color: Colors.white54),
                   ),
                 ],

@@ -19,9 +19,6 @@ import 'widgets/quick_actions.dart';
 import 'widgets/report_section.dart';
 import 'widgets/student_info.dart';
 import 'widgets/header_widget.dart';
-// Import service monitoring
-
-// ==================== MMKV LoginPreferences for HomeScreen ====================
 
 class HomeScreen extends StatefulWidget {
   final String username;
@@ -32,47 +29,63 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen>
-    with TickerProviderStateMixin, AutomaticKeepAliveClientMixin {
+    with
+        TickerProviderStateMixin,
+        AutomaticKeepAliveClientMixin,
+        WidgetsBindingObserver {
   @override
   bool get wantKeepAlive => true;
+
+  // Core state variables
   bool _isSaldoVisible = false;
-
-  // Bottom Navigation - Updated untuk 4 tabs
   int _currentIndex = 0;
+  Map<String, dynamic> _santriData = {};
+  Map<String, dynamic> _previousData = {};
+  bool _isLoading = true;
+  String _errorMessage = '';
+  List<String> _notifications = [];
 
-  void _toggleSaldoVisibility() {
-    setState(() {
-      _isSaldoVisible = !_isSaldoVisible;
-    });
-  }
-
-  // Animation
+  // Controllers
   late AnimationController _animationController;
   late AnimationController _shimmerController;
   late Animation<Offset> _slideAnimation;
   late Animation<double> _fadeAnimation;
   late Animation<double> _shimmerAnimation;
 
-  // Data states
-  Map<String, dynamic> _santriData = {};
-  Map<String, dynamic> _previousData = {};
-  bool _isLoading = true;
-  String _errorMessage = '';
-
-  // Enhanced Notifications - menggunakan service baru
+  // Enhanced Notifications
   ValueNotifier<List<NotificationItem>>? _enhancedNotifications;
   int get _enhancedNotificationCount =>
       _enhancedNotifications?.value.where((n) => !n.isRead).length ?? 0;
 
-  // Legacy notifications untuk backward compatibility
-  List<String> _notifications = [];
-
+  // Timers and utilities
   Timer? _dataTimer;
-  static const Duration _pollingInterval = Duration(minutes: 3);
+  Timer? _debounceTimer;
+  MMKV? _mmkv;
+  final _httpClient = http.Client();
 
-  static const List<String> _csvUrls = [
-    'https://docs.google.com/spreadsheets/d/1BZbBczH2OY8SB2_1tDpKf_B8WvOyk8TJl4esfT-dgzw/export?format=csv&gid=1307491664',
-    'https://docs.google.com/spreadsheets/d/1BZbBczH2OY8SB2_1tDpKf_B8WvOyk8TJl4esfT-dgzw/export?format=csv',
+  // Constants - Optimized for better performance
+  static const Duration _pollingInterval = Duration(
+    minutes: 5,
+  ); // Increased from 3 minutes
+  static const Duration _requestTimeout = Duration(
+    seconds: 12,
+  ); // Reduced from 20 seconds
+  static const Duration _cacheValidDuration = Duration(
+    minutes: 2,
+  ); // Cache validity
+
+  // Optimized CSV URLs with better error handling
+  static const List<Map<String, String>> _csvSources = [
+    {
+      'url':
+          'https://docs.google.com/spreadsheets/d/1BZbBczH2OY8SB2_1tDpKf_B8WvOyk8TJl4esfT-dgzw/export?format=csv&gid=1307491664',
+      'name': 'Primary Data Source',
+    },
+    {
+      'url':
+          'https://docs.google.com/spreadsheets/d/1BZbBczH2OY8SB2_1tDpKf_B8WvOyk8TJl4esfT-dgzw/export?format=csv',
+      'name': 'Secondary Data Source',
+    },
   ];
 
   static const Map<String, String> _fieldNames = {
@@ -86,43 +99,57 @@ class _HomeScreenState extends State<HomeScreen>
     'izin_terakhir': 'Izin Terakhir',
   };
 
-  MMKV? _mmkv;
-
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _initializeApp();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _shimmerController.stop();
     _animationController.dispose();
     _shimmerController.dispose();
     _dataTimer?.cancel();
+    _debounceTimer?.cancel();
+    _httpClient.close();
 
     // Cleanup enhanced notifications service
     GoogleSheetsMonitorService.cleanupForUser(widget.username);
-
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      _checkCacheAndRefresh();
+    } else if (state == AppLifecycleState.paused) {
+      _dataTimer?.cancel();
+    }
   }
 
   void _initializeAnimation() {
     _animationController = AnimationController(
-      duration: const Duration(milliseconds: 600),
+      duration: const Duration(milliseconds: 400), // Reduced from 600ms
       vsync: this,
     );
 
     _shimmerController = AnimationController(
-      duration: const Duration(milliseconds: 1500),
+      duration: const Duration(milliseconds: 1200), // Reduced from 1500ms
       vsync: this,
     );
 
     _slideAnimation =
-        Tween<Offset>(begin: const Offset(0.0, 0.3), end: Offset.zero).animate(
+        Tween<Offset>(
+          begin: const Offset(0.0, 0.2), // Reduced from 0.3
+          end: Offset.zero,
+        ).animate(
           CurvedAnimation(
             parent: _animationController,
-            curve: Curves.easeOutCubic,
+            curve: Curves.easeOutQuart, // Changed from easeOutCubic
           ),
         );
 
@@ -140,13 +167,15 @@ class _HomeScreenState extends State<HomeScreen>
       _initializeAnimation();
       await _initializeMMKV();
 
-      // Initialize enhanced notifications service
-      await GoogleSheetsMonitorService.initializeForUser(widget.username);
-      _enhancedNotifications =
-          GoogleSheetsMonitorService.getNotificationsForUser(widget.username);
-
+      // Load cached data first for immediate display
       await _loadCachedData();
-      await _fetchSantriData();
+
+      // Initialize enhanced notifications service
+      unawaited(_initializeNotifications());
+
+      // Check if cache is still valid, if not fetch new data
+      await _checkCacheAndRefresh();
+
       _startPolling();
     } catch (e) {
       debugPrint('Error initializing app: $e');
@@ -156,6 +185,16 @@ class _HomeScreenState extends State<HomeScreen>
           _errorMessage = 'Gagal memuat data';
         });
       }
+    }
+  }
+
+  Future<void> _initializeNotifications() async {
+    try {
+      await GoogleSheetsMonitorService.initializeForUser(widget.username);
+      _enhancedNotifications =
+          GoogleSheetsMonitorService.getNotificationsForUser(widget.username);
+    } catch (e) {
+      debugPrint('Error initializing notifications: $e');
     }
   }
 
@@ -175,7 +214,10 @@ class _HomeScreenState extends State<HomeScreen>
 
     try {
       final cachedDataKey = 'santri_${widget.username}';
+      final timestampKey = 'last_update_${widget.username}';
+
       final cachedData = _mmkv!.decodeString(cachedDataKey) ?? '';
+      final lastUpdate = _mmkv!.decodeInt(timestampKey) ?? 0;
 
       if (cachedData.isNotEmpty) {
         final decodedData = json.decode(cachedData) as Map<String, dynamic>;
@@ -188,9 +230,15 @@ class _HomeScreenState extends State<HomeScreen>
           });
         }
         _animationController.forward();
+
+        // Check cache age
+        final cacheAge = DateTime.now().millisecondsSinceEpoch - lastUpdate;
+        debugPrint(
+          'Cache age: ${Duration(milliseconds: cacheAge).inMinutes} minutes',
+        );
       }
 
-      // Load legacy notifications untuk backward compatibility
+      // Load notifications
       final notificationsKey = 'notifications_${widget.username}';
       final cachedNotificationsStr =
           _mmkv!.decodeString(notificationsKey) ?? '';
@@ -218,6 +266,19 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
+  Future<void> _checkCacheAndRefresh() async {
+    if (_mmkv == null) return;
+
+    final timestampKey = 'last_update_${widget.username}';
+    final lastUpdate = _mmkv!.decodeInt(timestampKey) ?? 0;
+    final now = DateTime.now().millisecondsSinceEpoch;
+
+    // If cache is older than valid duration, fetch new data
+    if (now - lastUpdate > _cacheValidDuration.inMilliseconds) {
+      await _fetchSantriData(silent: _santriData.isNotEmpty);
+    }
+  }
+
   void _startPolling() {
     _dataTimer?.cancel();
     _dataTimer = Timer.periodic(_pollingInterval, (_) {
@@ -228,6 +289,14 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _fetchSantriData({bool silent = false}) async {
+    // Debounce rapid requests
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 300), () async {
+      await _performDataFetch(silent: silent);
+    });
+  }
+
+  Future<void> _performDataFetch({bool silent = false}) async {
     if (!silent && mounted) {
       setState(() => _isLoading = true);
       if (!_shimmerController.isAnimating) {
@@ -235,119 +304,109 @@ class _HomeScreenState extends State<HomeScreen>
       }
     }
 
-    print('🌐 Starting data fetch for username: ${widget.username}');
+    debugPrint(
+      '🌐 Starting optimized data fetch for username: ${widget.username}',
+    );
 
+    // Quick connectivity check with reduced timeout
     try {
-      final result = await InternetAddress.lookup(
-        'google.com',
-      ).timeout(Duration(seconds: 5));
+      final result = await InternetAddress.lookup('dns.google').timeout(
+        const Duration(seconds: 3), // Reduced from 5 seconds
+      );
       if (result.isEmpty || result[0].rawAddress.isEmpty) {
         throw Exception('No internet connection');
       }
     } catch (e) {
-      print('❌ Internet connectivity check failed: $e');
+      debugPrint('❌ Internet connectivity check failed: $e');
       await _handleFetchError('Tidak ada koneksi internet', silent);
       return;
     }
 
-    for (int urlIndex = 0; urlIndex < _csvUrls.length; urlIndex++) {
-      final csvUrl = _csvUrls[urlIndex];
-      print('🔗 Trying CSV URL ${urlIndex + 1}: $csvUrl');
+    // Try CSV sources with improved error handling
+    for (int sourceIndex = 0; sourceIndex < _csvSources.length; sourceIndex++) {
+      final source = _csvSources[sourceIndex];
+      debugPrint('🔗 Trying ${source['name']}: ${source['url']}');
 
       try {
-        final response = await http
-            .get(
-              Uri.parse(csvUrl),
-              headers: {
-                'User-Agent':
-                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Accept': 'text/csv,application/csv,text/plain,*/*',
-                'Accept-Language': 'en-US,en;q=0.9,id;q=0.8',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'Connection': 'keep-alive',
-                'Cache-Control': 'no-cache',
-                'Pragma': 'no-cache',
-              },
-            )
-            .timeout(const Duration(seconds: 20));
+        final response = await _httpClient
+            .get(Uri.parse(source['url']!), headers: _getOptimizedHeaders())
+            .timeout(_requestTimeout);
 
-        print('📡 Response Status: ${response.statusCode}');
-        print('📡 Response Headers: ${response.headers}');
-        print('📄 Response Body Length: ${response.body.length}');
+        debugPrint('📡 Response Status: ${response.statusCode}');
 
         if (response.statusCode == 200 && response.body.isNotEmpty) {
-          if (response.body.toLowerCase().contains('error') ||
-              response.body.toLowerCase().contains('<html>')) {
-            print('⚠️ Invalid CSV content detected, trying next URL...');
-            continue;
-          }
-
-          print(
-            '📄 CSV Preview (first 200 chars): ${response.body.substring(0, response.body.length > 200 ? 200 : response.body.length)}...',
-          );
-
-          final csvData = const CsvToListConverter().convert(response.body);
-
-          if (csvData.isNotEmpty) {
-            print('📊 CSV parsed successfully: ${csvData.length} rows');
-            print('📊 CSV headers: ${csvData[0]}');
-
-            final newData = _parseCSV(csvData);
-
+          // Quick validation
+          if (_isValidCSVContent(response.body)) {
+            final newData = await _processCSVResponse(response.body);
             if (newData.isNotEmpty) {
-              print('✅ Data parsing successful for user: ${widget.username}');
+              debugPrint(
+                '✅ Data parsing successful for user: ${widget.username}',
+              );
               await _processNewData(newData);
               return;
-            } else {
-              print('⚠️ No data found for username: ${widget.username}');
             }
-          } else {
-            print('⚠️ CSV data is empty');
           }
-        } else {
-          print(
-            '❌ Invalid response - Status: ${response.statusCode}, Body length: ${response.body.length}',
-          );
         }
       } catch (e) {
-        print('❌ Error with URL ${urlIndex + 1}: $e');
+        debugPrint('❌ Error with ${source['name']}: $e');
+        if (e.toString().contains('400')) {
+          // Skip other sources if getting 400 errors
+          debugPrint('⚠️ HTTP 400 detected, trying fallback methods directly');
+          break;
+        }
       }
     }
 
-    print('⚠️ All CSV URLs failed, trying fallback methods...');
+    debugPrint('⚠️ All CSV sources failed, trying fallback methods...');
     await _tryFallbackMethods(silent);
   }
 
-  Future<void> _tryFallbackMethods(bool silent) async {
-    try {
-      print('🔄 Trying DataFetcher fallback...');
-      final dataFetcher = DataFetcher();
-      final fallbackData = await dataFetcher.fetchSantriData(widget.username);
-
-      if (fallbackData.isNotEmpty) {
-        print('✅ Fallback data fetcher successful');
-        await _processNewData(fallbackData);
-        return;
-      }
-    } catch (fallbackError) {
-      print('❌ Fallback fetch error: $fallbackError');
-    }
-
-    await _handleFetchError('Semua sumber data gagal diakses', silent);
+  Map<String, String> _getOptimizedHeaders() {
+    return {
+      'User-Agent':
+          'Mozilla/5.0 (Android 12; Mobile; rv:109.0) Gecko/109.0 Firefox/109.0',
+      'Accept': 'text/csv,text/plain,*/*;q=0.8',
+      'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
+      'Accept-Encoding': 'gzip, deflate',
+      'Connection': 'keep-alive',
+      'Cache-Control': 'no-cache',
+      'Pragma': 'no-cache',
+      'DNT': '1',
+    };
   }
 
-  Map<String, dynamic> _parseCSV(List<List<dynamic>> csvData) {
+  bool _isValidCSVContent(String content) {
+    if (content.length < 10) return false;
+    if (content.toLowerCase().contains('<html>')) return false;
+    if (content.toLowerCase().contains('error')) return false;
+    if (!content.contains(',') && !content.contains(';')) return false;
+    return true;
+  }
+
+  Future<Map<String, dynamic>> _processCSVResponse(String csvContent) async {
     try {
+      // Process CSV in isolate for better performance with large data
+      final csvData = const CsvToListConverter().convert(csvContent);
+
       if (csvData.isEmpty) {
-        print('❌ CSV data is empty');
+        debugPrint('❌ CSV data is empty');
         return {};
       }
 
+      return _parseCSVData(csvData);
+    } catch (e) {
+      debugPrint('❌ CSV processing error: $e');
+      return {};
+    }
+  }
+
+  Map<String, dynamic> _parseCSVData(List<List<dynamic>> csvData) {
+    try {
       final headers = csvData[0]
           .map((e) => e.toString().toLowerCase().trim().replaceAll(' ', '_'))
           .toList();
 
-      print('📊 Processed headers: $headers');
+      debugPrint('📊 Processed headers: $headers');
 
       final nisnIndex = _findColumnIndex(headers, [
         'nisn',
@@ -362,35 +421,48 @@ class _HomeScreenState extends State<HomeScreen>
       ]);
 
       if (nisnIndex == -1) {
-        print('❌ NISN column not found in headers: $headers');
+        debugPrint('❌ NISN column not found in headers: $headers');
         return {};
       }
 
-      print('✅ NISN column found at index: $nisnIndex');
-
+      // Optimize search by checking rows more efficiently
       for (int i = 1; i < csvData.length; i++) {
         final row = csvData[i];
-
         if (row.length > nisnIndex) {
           final csvNisn = row[nisnIndex]?.toString().trim() ?? '';
-
-          print(
-            '🔍 Checking row $i: CSV NISN="$csvNisn", Target="${widget.username}"',
-          );
-
           if (_isMatchingUser(widget.username, csvNisn)) {
-            print('✅ Match found for user: ${widget.username}');
+            debugPrint('✅ Match found for user: ${widget.username} at row $i');
             return _extractUserData(row, headers);
           }
         }
       }
 
-      print('❌ No matching user found for: ${widget.username}');
+      debugPrint('❌ No matching user found for: ${widget.username}');
       return {};
     } catch (e) {
-      print('❌ CSV parse error: $e');
+      debugPrint('❌ CSV parse error: $e');
       return {};
     }
+  }
+
+  Future<void> _tryFallbackMethods(bool silent) async {
+    try {
+      debugPrint('🔄 Trying DataFetcher fallback...');
+      final dataFetcher = DataFetcher();
+      final fallbackData = await dataFetcher
+          .fetchSantriData(widget.username)
+          .timeout(const Duration(seconds: 10));
+
+      if (fallbackData.isNotEmpty) {
+        debugPrint('✅ Fallback data fetcher successful');
+        await _processNewData(fallbackData);
+        return;
+      }
+    } catch (fallbackError) {
+      debugPrint('❌ Fallback fetch error: $fallbackError');
+    }
+
+    await _handleFetchError('Semua sumber data gagal diakses', silent);
   }
 
   bool _isMatchingUser(String targetUsername, String csvValue) {
@@ -431,7 +503,6 @@ class _HomeScreenState extends State<HomeScreen>
         'name',
         'student_name',
         'nama_santri',
-        'nama_lengkap',
       ], 'Santri'),
       'saldo': _formatSaldo(
         _getFieldValue(row, headers, [
@@ -439,7 +510,6 @@ class _HomeScreenState extends State<HomeScreen>
           'balance',
           'uang',
           'money',
-          'tabungan',
         ], '0'),
       ),
       'kelas': _getFieldValue(row, headers, [
@@ -458,13 +528,11 @@ class _HomeScreenState extends State<HomeScreen>
         'status_izin',
         'izin',
         'permission',
-        'status',
       ], 'Sedang Dipondok'),
       'jumlah_hafalan': _getFieldValue(row, headers, [
         'hafalan',
         'memorization',
         'jumlah_hafalan',
-        'juz',
       ], '0'),
       'absensi': _getFieldValue(row, headers, [
         'absensi',
@@ -475,7 +543,6 @@ class _HomeScreenState extends State<HomeScreen>
         'poin',
         'penalty',
         'pelanggaran',
-        'violation',
       ], '0'),
       'reward': _getFieldValue(row, headers, [
         'reward',
@@ -490,7 +557,6 @@ class _HomeScreenState extends State<HomeScreen>
       'izin_terakhir': _getFieldValue(row, headers, [
         'izin_terakhir',
         'last_permission',
-        'terakhir_izin',
       ], '-'),
     };
   }
@@ -513,12 +579,10 @@ class _HomeScreenState extends State<HomeScreen>
     String defaultValue,
   ) {
     final index = _findColumnIndex(headers, fieldNames);
-
     if (index >= 0 && index < row.length) {
       final value = row[index]?.toString().trim() ?? '';
       return value.isNotEmpty ? value : defaultValue;
     }
-
     return defaultValue;
   }
 
@@ -602,11 +666,7 @@ class _HomeScreenState extends State<HomeScreen>
         action: SnackBarAction(
           label: 'Lihat',
           textColor: Colors.white,
-          onPressed: () {
-            setState(() {
-              _currentIndex = 1;
-            });
-          },
+          onPressed: () => setState(() => _currentIndex = 1),
         ),
       ),
     );
@@ -617,13 +677,24 @@ class _HomeScreenState extends State<HomeScreen>
 
     try {
       final dataKey = 'santri_${widget.username}';
-      _mmkv!.encodeString(dataKey, json.encode(data));
-
       final notificationsKey = 'notifications_${widget.username}';
-      _mmkv!.encodeString(notificationsKey, json.encode(_notifications));
-
       final timestampKey = 'last_update_${widget.username}';
-      _mmkv!.encodeInt(timestampKey, DateTime.now().millisecondsSinceEpoch);
+
+      await Future.wait([
+        Future(() => _mmkv!.encodeString(dataKey, json.encode(data))),
+        Future(
+          () => _mmkv!.encodeString(
+            notificationsKey,
+            json.encode(_notifications),
+          ),
+        ),
+        Future(
+          () => _mmkv!.encodeInt(
+            timestampKey,
+            DateTime.now().millisecondsSinceEpoch,
+          ),
+        ),
+      ]);
 
       debugPrint('✅ Data saved to MMKV successfully');
     } catch (e) {
@@ -645,27 +716,14 @@ class _HomeScreenState extends State<HomeScreen>
       errorMessage = 'Tidak ada koneksi internet';
     } else if (error.toString().contains('timeout')) {
       errorMessage = 'Koneksi timeout, coba lagi nanti';
-    } else if (error.toString().contains('sumber data')) {
-      errorMessage = 'Sumber data sedang tidak tersedia';
+    } else if (error.toString().contains('400')) {
+      errorMessage = 'Server sedang bermasalah';
     }
 
     if (mounted) {
       if (_santriData.isEmpty) {
         setState(() {
-          _santriData = {
-            'nisn': widget.username,
-            'nama': 'Data tidak ditemukan',
-            'saldo': '0',
-            'status_izin': 'Sedang Dipondok',
-            'jumlah_hafalan': '0 JUZ',
-            'absensi': 'Belum dimulai',
-            'kelas': '-',
-            'asrama': '-',
-            'poin_pelanggaran': '0',
-            'reward': '0',
-            'lembaga': '-',
-            'izin_terakhir': '-',
-          };
+          _santriData = _getDefaultData();
           _isLoading = false;
           _errorMessage = silent ? '' : errorMessage;
         });
@@ -679,6 +737,29 @@ class _HomeScreenState extends State<HomeScreen>
         });
       }
     }
+  }
+
+  Map<String, dynamic> _getDefaultData() {
+    return {
+      'nisn': widget.username,
+      'nama': 'Data tidak ditemukan',
+      'saldo': '0',
+      'status_izin': 'Sedang Dipondok',
+      'jumlah_hafalan': '0 JUZ',
+      'absensi': 'Belum dimulai',
+      'kelas': '-',
+      'asrama': '-',
+      'poin_pelanggaran': '0',
+      'reward': '0',
+      'lembaga': '-',
+      'izin_terakhir': '-',
+    };
+  }
+
+  void _toggleSaldoVisibility() {
+    setState(() {
+      _isSaldoVisible = !_isSaldoVisible;
+    });
   }
 
   Future<void> _clearNotifications() async {
@@ -696,54 +777,34 @@ class _HomeScreenState extends State<HomeScreen>
 
   Future<void> _handleLogout() async {
     try {
-      debugPrint('🚪 Starting MMKV logout process...');
+      debugPrint('🚪 Starting optimized logout process...');
 
       _dataTimer?.cancel();
-      debugPrint('✅ Timer cancelled');
+      _debounceTimer?.cancel();
 
-      // Cleanup enhanced notifications service
       await GoogleSheetsMonitorService.cleanupForUser(widget.username);
-
       await LoginPreferences.clearAllUserData(widget.username);
-      debugPrint('📱 MMKV Clear data executed');
 
       if (_mmkv != null) {
-        debugPrint(
-          '⚠️ LoginPreferences clear failed, trying direct MMKV method...',
-        );
+        final keysToRemove = [
+          'user_logged_in',
+          'user_username',
+          'user_data_json',
+          'user_login_time',
+          'santri_${widget.username}',
+          'notifications_${widget.username}',
+          'last_update_${widget.username}',
+          'notifications_enhanced_${widget.username}',
+        ];
 
-        try {
-          final keysToRemove = [
-            'user_logged_in',
-            'user_username',
-            'user_data_json',
-            'user_login_time',
-            'santri_${widget.username}',
-            'notifications_${widget.username}',
-            'last_update_${widget.username}',
-            'notifications_enhanced_${widget.username}',
-          ];
-
-          for (final key in keysToRemove) {
-            if (_mmkv!.containsKey(key)) {
-              _mmkv!.removeValue(key);
-            }
+        for (final key in keysToRemove) {
+          if (_mmkv!.containsKey(key)) {
+            _mmkv!.removeValue(key);
           }
-
-          debugPrint('🗑️ Direct MMKV clear completed');
-        } catch (e) {
-          debugPrint('❌ Error during direct MMKV logout: $e');
         }
       }
 
-      await Future.delayed(Duration(milliseconds: 200));
-      final isStillLoggedIn = await LoginPreferences.isLoggedIn();
-      debugPrint(
-        '🔍 MMKV Logout verification - still logged in: $isStillLoggedIn',
-      );
-
       if (mounted) {
-        debugPrint('🔐 Navigating to LoginScreen');
         Navigator.pushReplacement(
           context,
           PageRouteBuilder(
@@ -758,15 +819,14 @@ class _HomeScreenState extends State<HomeScreen>
                     child: child,
                   );
                 },
-            transitionDuration: Duration(milliseconds: 300),
+            transitionDuration: const Duration(milliseconds: 250),
           ),
         );
       }
 
-      debugPrint('✅ MMKV Logout process completed');
+      debugPrint('✅ Optimized logout process completed');
     } catch (e) {
-      debugPrint('💥 MMKV Logout error: $e');
-
+      debugPrint('💥 Logout error: $e');
       if (mounted) {
         Navigator.pushReplacement(
           context,
@@ -777,17 +837,19 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _showLogoutDialog() async {
+    final screenSize = MediaQuery.of(context).size;
+
     return showDialog(
       context: context,
       builder: (BuildContext context) {
         return Dialog(
           backgroundColor: Colors.transparent,
           insetPadding: EdgeInsets.symmetric(
-            horizontal: max(20, MediaQuery.of(context).size.width * 0.1),
-            vertical: max(20, MediaQuery.of(context).size.height * 0.15),
+            horizontal: max(20, screenSize.width * 0.1),
+            vertical: max(20, screenSize.height * 0.15),
           ),
           child: Container(
-            padding: EdgeInsets.all(24),
+            padding: EdgeInsets.all(screenSize.width * 0.06),
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(20),
@@ -795,49 +857,44 @@ class _HomeScreenState extends State<HomeScreen>
                 BoxShadow(
                   color: Colors.black26,
                   blurRadius: 10,
-                  offset: Offset(0, 4),
+                  offset: const Offset(0, 4),
                 ),
               ],
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Icon logout
                 Container(
-                  padding: EdgeInsets.all(16),
+                  padding: EdgeInsets.all(screenSize.width * 0.04),
                   decoration: BoxDecoration(
                     color: Colors.red.withOpacity(0.1),
                     shape: BoxShape.circle,
                   ),
-                  child: Icon(Icons.logout, size: 40, color: Colors.red),
+                  child: Icon(
+                    Icons.logout,
+                    size: screenSize.width * 0.1,
+                    color: Colors.red,
+                  ),
                 ),
-                SizedBox(height: 20),
-
-                // Judul
+                SizedBox(height: screenSize.height * 0.025),
                 Text(
                   "Keluar Aplikasi",
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    fontSize: screenSize.width * 0.04,
+                    color: Colors.grey[700],
+                  ),
                 ),
-                SizedBox(height: 12),
-
-                // Pesan konfirmasi
-                Text(
-                  "Apakah Anda yakin ingin keluar dari akun ${widget.username}?",
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 16, color: Colors.grey[700]),
-                ),
-                SizedBox(height: 24),
-
-                // Tombol aksi
+                SizedBox(height: screenSize.height * 0.03),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
-                    // Tombol batal
                     Expanded(
                       child: OutlinedButton(
                         onPressed: () => Navigator.pop(context),
                         style: OutlinedButton.styleFrom(
-                          padding: EdgeInsets.symmetric(vertical: 12),
+                          padding: EdgeInsets.symmetric(
+                            vertical: screenSize.height * 0.015,
+                          ),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(10),
                           ),
@@ -845,29 +902,35 @@ class _HomeScreenState extends State<HomeScreen>
                         ),
                         child: Text(
                           "Batal",
-                          style: TextStyle(color: Colors.grey[700]),
+                          style: TextStyle(
+                            color: Colors.grey[700],
+                            fontSize: screenSize.width * 0.035,
+                          ),
                         ),
                       ),
                     ),
-                    SizedBox(width: 16),
-
-                    // Tombol logout
+                    SizedBox(width: screenSize.width * 0.04),
                     Expanded(
                       child: ElevatedButton(
                         onPressed: () {
-                          Navigator.pop(context); // Tutup dialog
-                          _handleLogout(); // Jalankan proses logout
+                          Navigator.pop(context);
+                          _handleLogout();
                         },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.red,
-                          padding: EdgeInsets.symmetric(vertical: 12),
+                          padding: EdgeInsets.symmetric(
+                            vertical: screenSize.height * 0.015,
+                          ),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(10),
                           ),
                         ),
                         child: Text(
                           "Keluar",
-                          style: TextStyle(color: Colors.white),
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: screenSize.width * 0.035,
+                          ),
                         ),
                       ),
                     ),
@@ -880,9 +943,6 @@ class _HomeScreenState extends State<HomeScreen>
       },
     );
   }
-
-  // Panggil fungsi ini sebagai ganti langsung memanggil _handleLogout()
-  // Misalnya, dari sebuah tombol logout
 
   void _showTopUpDialog() {
     TopUpDialog.show(
@@ -898,7 +958,6 @@ class _HomeScreenState extends State<HomeScreen>
       context: context,
       username: widget.username,
       onClearAll: () {
-        // Refresh UI setelah clear notifications
         if (mounted) {
           setState(() {});
         }
@@ -908,32 +967,23 @@ class _HomeScreenState extends State<HomeScreen>
 
   Future<void> _handleRefresh() async {
     await _fetchSantriData();
-    // Force check enhanced notifications
-    await GoogleSheetsMonitorService.forceCheckForUser(widget.username);
+    if (_enhancedNotifications != null) {
+      unawaited(GoogleSheetsMonitorService.forceCheckForUser(widget.username));
+    }
   }
 
   void _onBottomNavTap(int index) {
     switch (index) {
       case 0:
-        // Home tab
-        setState(() {
-          _currentIndex = 0;
-        });
+        setState(() => _currentIndex = 0);
         break;
       case 1:
-        // Notification tab
-        setState(() {
-          _currentIndex = 1;
-        });
+        setState(() => _currentIndex = 1);
         break;
       case 2:
-        // Payment tab - NEW
-        setState(() {
-          _currentIndex = 2;
-        });
+        setState(() => _currentIndex = 2);
         break;
       case 3:
-        // Logout
         _showLogoutDialog();
         break;
     }
@@ -942,6 +992,7 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    final screenSize = MediaQuery.of(context).size;
 
     return Scaffold(
       backgroundColor: Colors.grey[50],
@@ -949,13 +1000,10 @@ class _HomeScreenState extends State<HomeScreen>
         child: IndexedStack(
           index: _currentIndex,
           children: [
-            // Home Tab
             _isLoading && _santriData.isEmpty
-                ? _buildLoadingState()
-                : _buildMainContent(),
-            // Notification Tab - Enhanced
-            _buildEnhancedNotificationPage(),
-            // Payment Tab - NEW
+                ? _buildLoadingState(screenSize)
+                : _buildMainContent(screenSize),
+            _buildEnhancedNotificationPage(screenSize),
             PaymentPage(
               username: widget.username,
               studentName: _santriData['nama'] ?? 'Santri',
@@ -963,115 +1011,90 @@ class _HomeScreenState extends State<HomeScreen>
           ],
         ),
       ),
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.grey.withOpacity(0.2),
-              blurRadius: 10,
-              offset: const Offset(0, -2),
-            ),
-          ],
-        ),
-        child: BottomNavigationBar(
-          currentIndex: _currentIndex > 2 ? 0 : _currentIndex,
-          onTap: _onBottomNavTap,
-          type: BottomNavigationBarType.fixed,
-          backgroundColor: Colors.white,
-          selectedItemColor: Colors.red[600],
-          unselectedItemColor: Colors.grey[500],
-          selectedFontSize: 12,
-          unselectedFontSize: 12,
-          elevation: 0,
-          items: [
-            const BottomNavigationBarItem(
-              icon: Icon(Icons.home),
-              activeIcon: Icon(Icons.home),
-              label: 'Home',
-            ),
-            BottomNavigationBarItem(
-              icon: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  const Icon(Icons.notifications),
-                  if (_enhancedNotificationCount > 0)
-                    Positioned(
-                      right: -6,
-                      top: -6,
-                      child: Container(
-                        padding: const EdgeInsets.all(2),
-                        decoration: BoxDecoration(
-                          color: Colors.red,
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        constraints: const BoxConstraints(
-                          minWidth: 12,
-                          minHeight: 12,
-                        ),
-                        child: Text(
-                          '$_enhancedNotificationCount',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 8,
-                            fontWeight: FontWeight.bold,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-              activeIcon: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  const Icon(Icons.notifications_active),
-                  if (_enhancedNotificationCount > 0)
-                    Positioned(
-                      right: -6,
-                      top: -6,
-                      child: Container(
-                        padding: const EdgeInsets.all(2),
-                        decoration: BoxDecoration(
-                          color: Colors.red,
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        constraints: const BoxConstraints(
-                          minWidth: 12,
-                          minHeight: 12,
-                        ),
-                        child: Text(
-                          '$_enhancedNotificationCount',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 8,
-                            fontWeight: FontWeight.bold,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-              label: 'Notifikasi',
-            ),
-            const BottomNavigationBarItem(
-              icon: Icon(Icons.payment),
-              activeIcon: Icon(Icons.payment),
-              label: 'Pembayaran',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.logout, color: Colors.grey),
-              activeIcon: Icon(Icons.logout, color: Colors.red[600]),
-              label: 'Keluar',
-            ),
-          ],
-        ),
+      bottomNavigationBar: _buildBottomNavigationBar(screenSize),
+    );
+  }
+
+  Widget _buildBottomNavigationBar(Size screenSize) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withOpacity(0.2),
+            blurRadius: 10,
+            offset: const Offset(0, -2),
+          ),
+        ],
+      ),
+      child: BottomNavigationBar(
+        currentIndex: _currentIndex > 2 ? 0 : _currentIndex,
+        onTap: _onBottomNavTap,
+        type: BottomNavigationBarType.fixed,
+        backgroundColor: Colors.white,
+        selectedItemColor: Colors.red[600],
+        unselectedItemColor: Colors.grey[500],
+        selectedFontSize: screenSize.width * 0.028,
+        unselectedFontSize: screenSize.width * 0.025,
+        elevation: 0,
+        items: [
+          const BottomNavigationBarItem(
+            icon: Icon(Icons.home),
+            activeIcon: Icon(Icons.home),
+            label: 'Home',
+          ),
+          BottomNavigationBarItem(
+            icon: _buildNotificationIcon(),
+            activeIcon: _buildNotificationIcon(active: true),
+            label: 'Notifikasi',
+          ),
+          const BottomNavigationBarItem(
+            icon: Icon(Icons.payment),
+            activeIcon: Icon(Icons.payment),
+            label: 'Pembayaran',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.logout, color: Colors.grey),
+            activeIcon: Icon(Icons.logout, color: Colors.red[600]),
+            label: 'Keluar',
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildMainContent() {
+  Widget _buildNotificationIcon({bool active = false}) {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Icon(active ? Icons.notifications_active : Icons.notifications),
+        if (_enhancedNotificationCount > 0)
+          Positioned(
+            right: -6,
+            top: -6,
+            child: Container(
+              padding: const EdgeInsets.all(2),
+              decoration: BoxDecoration(
+                color: Colors.red,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              constraints: const BoxConstraints(minWidth: 12, minHeight: 12),
+              child: Text(
+                '$_enhancedNotificationCount',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 8,
+                  fontWeight: FontWeight.bold,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildMainContent(Size screenSize) {
     return SlideTransition(
       position: _slideAnimation,
       child: FadeTransition(
@@ -1084,7 +1107,12 @@ class _HomeScreenState extends State<HomeScreen>
             child: Column(
               children: [
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                  padding: EdgeInsets.fromLTRB(
+                    screenSize.width * 0.04,
+                    screenSize.width * 0.04,
+                    screenSize.width * 0.04,
+                    0,
+                  ),
                   child: CombinedHeader(
                     santriData: _santriData,
                     notificationCount: _enhancedNotificationCount,
@@ -1097,19 +1125,19 @@ class _HomeScreenState extends State<HomeScreen>
                   ),
                 ),
                 Padding(
-                  padding: const EdgeInsets.all(20),
+                  padding: EdgeInsets.all(screenSize.width * 0.05),
                   child: Column(
                     children: [
                       if (_errorMessage.isNotEmpty) ...[
-                        _buildErrorBanner(),
-                        const SizedBox(height: 16),
+                        _buildErrorBanner(screenSize),
+                        SizedBox(height: screenSize.height * 0.02),
                       ],
                       QuickActions(nisn: widget.username),
-                      const SizedBox(height: 24),
+                      SizedBox(height: screenSize.height * 0.03),
                       _buildReportSection(),
-                      const SizedBox(height: 20),
+                      SizedBox(height: screenSize.height * 0.025),
                       _buildStudentInfo(),
-                      const SizedBox(height: 20),
+                      SizedBox(height: screenSize.height * 0.025),
                     ],
                   ),
                 ),
@@ -1121,7 +1149,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  Widget _buildEnhancedNotificationPage() {
+  Widget _buildEnhancedNotificationPage(Size screenSize) {
     return Scaffold(
       backgroundColor: Colors.grey[50],
       appBar: AppBar(
@@ -1132,8 +1160,17 @@ class _HomeScreenState extends State<HomeScreen>
             return Row(
               children: [
                 Icon(Icons.notifications_active, color: Colors.red[600]),
-                const SizedBox(width: 12),
-                Text('Notifikasi ($unreadCount baru)'),
+                SizedBox(width: screenSize.width * 0.03),
+                Flexible(
+                  child: Text(
+                    'Notifikasi ($unreadCount baru)',
+                    style: TextStyle(
+                      color: Colors.grey[800],
+                      fontWeight: FontWeight.bold,
+                      fontSize: screenSize.width * 0.045,
+                    ),
+                  ),
+                ),
               ],
             );
           },
@@ -1159,6 +1196,7 @@ class _HomeScreenState extends State<HomeScreen>
                     style: TextStyle(
                       color: Colors.red[600],
                       fontWeight: FontWeight.w500,
+                      fontSize: screenSize.width * 0.032,
                     ),
                   ),
                 );
@@ -1172,165 +1210,177 @@ class _HomeScreenState extends State<HomeScreen>
         valueListenable: _enhancedNotifications ?? ValueNotifier([]),
         builder: (context, notifications, child) {
           if (notifications.isEmpty) {
-            return _buildEmptyNotifications();
+            return _buildEmptyNotifications(screenSize);
           }
-          return _buildEnhancedNotificationList(notifications);
+          return _buildEnhancedNotificationList(notifications, screenSize);
         },
       ),
     );
   }
 
-  Widget _buildEmptyNotifications() {
+  Widget _buildEmptyNotifications(Size screenSize) {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Container(
-            padding: const EdgeInsets.all(32),
+            padding: EdgeInsets.all(screenSize.width * 0.08),
             decoration: BoxDecoration(
               color: Colors.grey[100],
               shape: BoxShape.circle,
             ),
             child: Icon(
               Icons.notifications_none,
-              size: 64,
+              size: screenSize.width * 0.16,
               color: Colors.grey[400],
             ),
           ),
-          const SizedBox(height: 24),
+          SizedBox(height: screenSize.height * 0.03),
           Text(
             'Tidak ada notifikasi',
             style: TextStyle(
-              fontSize: 18,
+              fontSize: screenSize.width * 0.045,
               fontWeight: FontWeight.w600,
               color: Colors.grey[600],
             ),
           ),
-          const SizedBox(height: 8),
+          SizedBox(height: screenSize.height * 0.01),
           Text(
             'Perubahan data akan muncul di sini',
-            style: TextStyle(fontSize: 14, color: Colors.grey[500]),
+            style: TextStyle(
+              fontSize: screenSize.width * 0.035,
+              color: Colors.grey[500],
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildEnhancedNotificationList(List<NotificationItem> notifications) {
+  Widget _buildEnhancedNotificationList(
+    List<NotificationItem> notifications,
+    Size screenSize,
+  ) {
     return RefreshIndicator(
       color: Colors.red[400],
       onRefresh: _handleRefresh,
       child: ListView.separated(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.all(screenSize.width * 0.04),
         itemCount: notifications.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 12),
-        itemBuilder: (context, index) {
-          final notification = notifications[index];
-          return Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: notification.isRead ? Colors.white : Colors.blue[50],
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
+        separatorBuilder: (_, __) =>
+            SizedBox(height: screenSize.height * 0.015),
+        itemBuilder: (context, index) =>
+            _buildNotificationItem(notifications[index], screenSize),
+      ),
+    );
+  }
+
+  Widget _buildNotificationItem(
+    NotificationItem notification,
+    Size screenSize,
+  ) {
+    return Container(
+      padding: EdgeInsets.all(screenSize.width * 0.04),
+      decoration: BoxDecoration(
+        color: notification.isRead ? Colors.white : Colors.blue[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: notification.isRead ? Colors.grey[200]! : Colors.blue[200]!,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withOpacity(0.1),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: InkWell(
+        onTap: () {
+          GoogleSheetsMonitorService.markAsReadForUser(
+            widget.username,
+            notification.id,
+          );
+        },
+        child: Row(
+          children: [
+            Container(
+              padding: EdgeInsets.all(screenSize.width * 0.02),
+              decoration: BoxDecoration(
                 color: notification.isRead
-                    ? Colors.grey[200]!
-                    : Colors.blue[200]!,
+                    ? Colors.grey[100]
+                    : Colors.blue[100],
+                borderRadius: BorderRadius.circular(8),
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.grey.withOpacity(0.1),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                ),
-              ],
+              child: Icon(
+                notification.isRead ? Icons.info_outline : Icons.info,
+                color: notification.isRead
+                    ? Colors.grey[600]
+                    : Colors.blue[600],
+                size: screenSize.width * 0.05,
+              ),
             ),
-            child: InkWell(
-              onTap: () {
-                GoogleSheetsMonitorService.markAsReadForUser(
-                  widget.username,
-                  notification.id,
-                );
-              },
-              child: Row(
+            SizedBox(width: screenSize.width * 0.03),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: notification.isRead
-                          ? Colors.grey[100]
-                          : Colors.blue[100],
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Icon(
-                      notification.isRead ? Icons.info_outline : Icons.info,
-                      color: notification.isRead
-                          ? Colors.grey[600]
-                          : Colors.blue[600],
-                      size: 20,
+                  Row(
+                    children: [
+                      if (!notification.isRead)
+                        Container(
+                          width: 8,
+                          height: 8,
+                          margin: EdgeInsets.only(
+                            right: screenSize.width * 0.02,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.blue[400],
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      Expanded(
+                        child: Text(
+                          notification.title,
+                          style: TextStyle(
+                            fontSize: screenSize.width * 0.035,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.grey[800],
+                          ),
+                        ),
+                      ),
+                      Text(
+                        _formatTimestamp(notification.timestamp),
+                        style: TextStyle(
+                          fontSize: screenSize.width * 0.028,
+                          color: Colors.grey[500],
+                        ),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: screenSize.height * 0.005),
+                  Text(
+                    notification.message,
+                    style: TextStyle(
+                      fontSize: screenSize.width * 0.032,
+                      fontWeight: FontWeight.w500,
+                      height: 1.4,
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            if (!notification.isRead)
-                              Container(
-                                width: 8,
-                                height: 8,
-                                margin: EdgeInsets.only(right: 8),
-                                decoration: BoxDecoration(
-                                  color: Colors.blue[400],
-                                  shape: BoxShape.circle,
-                                ),
-                              ),
-                            Expanded(
-                              child: Text(
-                                notification.title,
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.grey[800],
-                                ),
-                              ),
-                            ),
-                            Text(
-                              _formatTimestamp(notification.timestamp),
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: Colors.grey[500],
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          notification.message,
-                          style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
-                            height: 1.4,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Sumber: ${notification.sheetName}',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.grey[500],
-                            fontStyle: FontStyle.italic,
-                          ),
-                        ),
-                      ],
+                  SizedBox(height: screenSize.height * 0.005),
+                  Text(
+                    'Sumber: ${notification.sheetName}',
+                    style: TextStyle(
+                      fontSize: screenSize.width * 0.028,
+                      color: Colors.grey[500],
+                      fontStyle: FontStyle.italic,
                     ),
                   ),
                 ],
               ),
             ),
-          );
-        },
+          ],
+        ),
       ),
     );
   }
@@ -1350,24 +1400,29 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
-  Widget _buildLoadingState() {
+  Widget _buildLoadingState(Size screenSize) {
     return SingleChildScrollView(
       physics: const NeverScrollableScrollPhysics(),
       child: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-            child: _buildHeaderShimmer(),
+            padding: EdgeInsets.fromLTRB(
+              screenSize.width * 0.04,
+              screenSize.width * 0.04,
+              screenSize.width * 0.04,
+              0,
+            ),
+            child: _buildHeaderShimmer(screenSize),
           ),
           Padding(
-            padding: const EdgeInsets.all(20),
+            padding: EdgeInsets.all(screenSize.width * 0.05),
             child: Column(
               children: [
-                _buildQuickActionsShimmer(),
-                const SizedBox(height: 24),
-                _buildReportShimmer(),
-                const SizedBox(height: 20),
-                _buildStudentInfoShimmer(),
+                _buildQuickActionsShimmer(screenSize),
+                SizedBox(height: screenSize.height * 0.03),
+                _buildReportShimmer(screenSize),
+                SizedBox(height: screenSize.height * 0.025),
+                _buildStudentInfoShimmer(screenSize),
               ],
             ),
           ),
@@ -1403,7 +1458,7 @@ class _HomeScreenState extends State<HomeScreen>
                     Colors.grey[100]!,
                     Colors.grey[300]!,
                   ],
-                  stops: [0.0, 0.5, 1.0],
+                  stops: const [0.0, 0.5, 1.0],
                   transform: GradientRotation(_shimmerAnimation.value * 0.3),
                 ),
               ),
@@ -1414,23 +1469,20 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  Widget _buildHeaderShimmer() {
-    final screenSize = MediaQuery.of(context).size;
-    final bool isSmallScreen = screenSize.width < 360;
-
+  Widget _buildHeaderShimmer(Size screenSize) {
     return Container(
       padding: EdgeInsets.symmetric(
-        vertical: isSmallScreen ? 20 : 24,
-        horizontal: isSmallScreen ? 20 : 24,
+        vertical: screenSize.width * 0.05,
+        horizontal: screenSize.width * 0.06,
       ),
       decoration: BoxDecoration(
         color: Colors.grey[300],
-        borderRadius: BorderRadius.circular(isSmallScreen ? 20 : 24),
+        borderRadius: BorderRadius.circular(screenSize.width * 0.06),
         boxShadow: [
           BoxShadow(
             color: Colors.grey.withOpacity(0.2),
             blurRadius: 10,
-            offset: Offset(0, 4),
+            offset: const Offset(0, 4),
           ),
         ],
       ),
@@ -1439,30 +1491,30 @@ class _HomeScreenState extends State<HomeScreen>
           Row(
             children: [
               _buildShimmerContainer(
-                width: isSmallScreen ? 50 : 56,
-                height: isSmallScreen ? 50 : 56,
+                width: screenSize.width * 0.14,
+                height: screenSize.width * 0.14,
                 borderRadius: 16,
               ),
-              SizedBox(width: isSmallScreen ? 16 : 20),
+              SizedBox(width: screenSize.width * 0.05),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     _buildShimmerContainer(
-                      width: 120,
-                      height: isSmallScreen ? 13 : 14,
+                      width: screenSize.width * 0.3,
+                      height: screenSize.width * 0.035,
                       borderRadius: 6,
                     ),
-                    const SizedBox(height: 4),
+                    SizedBox(height: screenSize.height * 0.005),
                     _buildShimmerContainer(
-                      width: 180,
-                      height: isSmallScreen ? 18 : 20,
+                      width: screenSize.width * 0.45,
+                      height: screenSize.width * 0.05,
                       borderRadius: 8,
                     ),
-                    const SizedBox(height: 2),
+                    SizedBox(height: screenSize.height * 0.003),
                     _buildShimmerContainer(
-                      width: 140,
-                      height: isSmallScreen ? 13 : 14,
+                      width: screenSize.width * 0.35,
+                      height: screenSize.width * 0.035,
                       borderRadius: 6,
                     ),
                   ],
@@ -1470,9 +1522,9 @@ class _HomeScreenState extends State<HomeScreen>
               ),
             ],
           ),
-          SizedBox(height: isSmallScreen ? 24 : 28),
+          SizedBox(height: screenSize.height * 0.035),
           Container(
-            padding: EdgeInsets.all(isSmallScreen ? 18 : 22),
+            padding: EdgeInsets.all(screenSize.width * 0.055),
             decoration: BoxDecoration(
               color: Colors.grey[200],
               borderRadius: BorderRadius.circular(18),
@@ -1487,23 +1539,23 @@ class _HomeScreenState extends State<HomeScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       _buildShimmerContainer(
-                        width: 100,
-                        height: isSmallScreen ? 12 : 13,
+                        width: screenSize.width * 0.25,
+                        height: screenSize.width * 0.032,
                         borderRadius: 6,
                       ),
-                      const SizedBox(height: 8),
+                      SizedBox(height: screenSize.height * 0.01),
                       _buildShimmerContainer(
-                        width: 160,
-                        height: isSmallScreen ? 22 : 26,
+                        width: screenSize.width * 0.4,
+                        height: screenSize.width * 0.065,
                         borderRadius: 10,
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(width: 16),
+                SizedBox(width: screenSize.width * 0.04),
                 _buildShimmerContainer(
-                  width: isSmallScreen ? 32 : 36,
-                  height: isSmallScreen ? 32 : 36,
+                  width: screenSize.width * 0.09,
+                  height: screenSize.width * 0.09,
                   borderRadius: 12,
                 ),
               ],
@@ -1514,10 +1566,10 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  Widget _buildQuickActionsShimmer() {
+  Widget _buildQuickActionsShimmer(Size screenSize) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(20),
+      padding: EdgeInsets.all(screenSize.width * 0.05),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
@@ -1532,8 +1584,12 @@ class _HomeScreenState extends State<HomeScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildShimmerContainer(width: 120, height: 20, borderRadius: 10),
-          const SizedBox(height: 16),
+          _buildShimmerContainer(
+            width: screenSize.width * 0.3,
+            height: screenSize.width * 0.05,
+            borderRadius: 10,
+          ),
+          SizedBox(height: screenSize.height * 0.02),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: List.generate(
@@ -1541,14 +1597,14 @@ class _HomeScreenState extends State<HomeScreen>
               (index) => Column(
                 children: [
                   _buildShimmerContainer(
-                    width: 50,
-                    height: 50,
-                    borderRadius: 25,
+                    width: screenSize.width * 0.125,
+                    height: screenSize.width * 0.125,
+                    borderRadius: screenSize.width * 0.0625,
                   ),
-                  const SizedBox(height: 8),
+                  SizedBox(height: screenSize.height * 0.01),
                   _buildShimmerContainer(
-                    width: 60,
-                    height: 12,
+                    width: screenSize.width * 0.15,
+                    height: screenSize.width * 0.03,
                     borderRadius: 6,
                   ),
                 ],
@@ -1560,10 +1616,10 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  Widget _buildReportShimmer() {
+  Widget _buildReportShimmer(Size screenSize) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(20),
+      padding: EdgeInsets.all(screenSize.width * 0.05),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
@@ -1578,8 +1634,12 @@ class _HomeScreenState extends State<HomeScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildShimmerContainer(width: 100, height: 20, borderRadius: 10),
-          const SizedBox(height: 16),
+          _buildShimmerContainer(
+            width: screenSize.width * 0.25,
+            height: screenSize.width * 0.05,
+            borderRadius: 10,
+          ),
+          SizedBox(height: screenSize.height * 0.02),
           Row(
             children: [
               Expanded(
@@ -1587,31 +1647,31 @@ class _HomeScreenState extends State<HomeScreen>
                   children: [
                     _buildShimmerContainer(
                       width: double.infinity,
-                      height: 16,
+                      height: screenSize.width * 0.04,
                       borderRadius: 8,
                     ),
-                    const SizedBox(height: 8),
+                    SizedBox(height: screenSize.height * 0.01),
                     _buildShimmerContainer(
-                      width: 80,
-                      height: 24,
+                      width: screenSize.width * 0.2,
+                      height: screenSize.width * 0.06,
                       borderRadius: 12,
                     ),
                   ],
                 ),
               ),
-              const SizedBox(width: 16),
+              SizedBox(width: screenSize.width * 0.04),
               Expanded(
                 child: Column(
                   children: [
                     _buildShimmerContainer(
                       width: double.infinity,
-                      height: 16,
+                      height: screenSize.width * 0.04,
                       borderRadius: 8,
                     ),
-                    const SizedBox(height: 8),
+                    SizedBox(height: screenSize.height * 0.01),
                     _buildShimmerContainer(
-                      width: 80,
-                      height: 24,
+                      width: screenSize.width * 0.2,
+                      height: screenSize.width * 0.06,
                       borderRadius: 12,
                     ),
                   ],
@@ -1624,10 +1684,10 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  Widget _buildStudentInfoShimmer() {
+  Widget _buildStudentInfoShimmer(Size screenSize) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(20),
+      padding: EdgeInsets.all(screenSize.width * 0.05),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
@@ -1642,23 +1702,27 @@ class _HomeScreenState extends State<HomeScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildShimmerContainer(width: 120, height: 20, borderRadius: 10),
-          const SizedBox(height: 16),
+          _buildShimmerContainer(
+            width: screenSize.width * 0.3,
+            height: screenSize.width * 0.05,
+            borderRadius: 10,
+          ),
+          SizedBox(height: screenSize.height * 0.02),
           ...List.generate(
             4,
             (index) => Padding(
-              padding: const EdgeInsets.only(bottom: 12),
+              padding: EdgeInsets.only(bottom: screenSize.height * 0.015),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   _buildShimmerContainer(
-                    width: 100,
-                    height: 16,
+                    width: screenSize.width * 0.25,
+                    height: screenSize.width * 0.04,
                     borderRadius: 8,
                   ),
                   _buildShimmerContainer(
-                    width: 80,
-                    height: 16,
+                    width: screenSize.width * 0.2,
+                    height: screenSize.width * 0.04,
                     borderRadius: 8,
                   ),
                 ],
@@ -1670,10 +1734,10 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  Widget _buildErrorBanner() {
+  Widget _buildErrorBanner(Size screenSize) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.all(screenSize.width * 0.04),
       decoration: BoxDecoration(
         color: Colors.amber[50],
         borderRadius: BorderRadius.circular(12),
@@ -1681,14 +1745,18 @@ class _HomeScreenState extends State<HomeScreen>
       ),
       child: Row(
         children: [
-          Icon(Icons.info_outline, color: Colors.amber[700], size: 22),
-          const SizedBox(width: 12),
+          Icon(
+            Icons.info_outline,
+            color: Colors.amber[700],
+            size: screenSize.width * 0.055,
+          ),
+          SizedBox(width: screenSize.width * 0.03),
           Expanded(
             child: Text(
               _errorMessage,
               style: TextStyle(
                 color: Colors.amber[800],
-                fontSize: 14,
+                fontSize: screenSize.width * 0.035,
                 fontWeight: FontWeight.w500,
               ),
             ),

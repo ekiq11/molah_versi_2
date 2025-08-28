@@ -305,10 +305,15 @@ class _SplashScreenState extends State<SplashScreen>
                           ),
                         ],
                       ),
-                      child: const Icon(
-                        Icons.school,
-                        size: 50,
-                        color: Color(0xFFE53E3E),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(
+                          50,
+                        ), // Agar gambar juga membulat
+                        child: Image(
+                          image: AssetImage('assets/img/molah.png'),
+                          fit: BoxFit
+                              .contain, // Gambar akan menyesuaikan proporsional di dalam container
+                        ),
                       ),
                     ),
                   ),
@@ -368,6 +373,7 @@ class _SplashScreenState extends State<SplashScreen>
                       vertical: 4,
                     ),
                     decoration: BoxDecoration(
+                      // ignore: deprecated_member_use
                       color: Colors.black.withOpacity(0.2),
                       borderRadius: BorderRadius.circular(12),
                     ),
@@ -385,7 +391,7 @@ class _SplashScreenState extends State<SplashScreen>
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: const Text(
-                    'MOLAH v1.0.0 - Powered by Pizab',
+                    'MOLAH v2.0.0 - Powered by Pizab',
                     style: TextStyle(fontSize: 10, color: Colors.white54),
                     textAlign: TextAlign.center,
                   ),

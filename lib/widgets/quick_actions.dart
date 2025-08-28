@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:molahv2/screens/HafalanHistoryPage.dart';
 import 'package:molahv2/screens/ekskul.dart';
+import 'package:molahv2/screens/history_transaction.dart';
 import 'package:molahv2/screens/reward.dart';
 import 'package:molahv2/screens/spp.dart';
 
@@ -149,6 +150,30 @@ class QuickActions extends StatelessWidget {
                     },
                   ),
                   SizedBox(width: 4), // Spasi akhir
+                  _buildActionCard(
+                    context: context,
+                    icon: Icons.account_balance_wallet_rounded,
+                    title: 'RIWAYAT\nTRANSAKSI',
+                    color: Colors.red[700]!,
+                    cardWidth: cardWidth,
+                    cardHeight: cardHeight,
+                    iconSize: iconSize,
+                    iconContainerSize: iconContainerSize,
+                    isSmallScreen: isSmallScreen,
+                    isLargeScreen: isLargeScreen,
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => TransactionHistoryPage(
+                            nisn: nisn,
+                            studentName:
+                                'Santri', // Atau bisa diambil dari data santri jika ada
+                          ),
+                        ),
+                      );
+                    },
+                  ),
                 ],
               ),
             );

@@ -10,8 +10,7 @@ class HafalanHistoryPage extends StatefulWidget {
   final String nisn;
   final String? namaSantri;
 
-  const HafalanHistoryPage({Key? key, required this.nisn, this.namaSantri})
-    : super(key: key);
+  const HafalanHistoryPage({super.key, required this.nisn, this.namaSantri});
 
   @override
   State<HafalanHistoryPage> createState() => _HafalanHistoryPageState();
@@ -46,7 +45,7 @@ class HafalanData {
 
   factory HafalanData.fromCsvRow(List<dynamic> row) {
     return HafalanData(
-      waktu: row.length > 0 ? row[0].toString() : '',
+      waktu: row.isNotEmpty ? row[0].toString() : '',
       tanggal: row.length > 1 ? row[1].toString() : '',
       nisn: row.length > 2 ? row[2].toString().replaceAll("'", "").trim() : '',
       namaSantri: row.length > 3 ? row[3].toString() : '',
@@ -60,7 +59,6 @@ class HafalanData {
     );
   }
 
-  // Convert to JSON for caching
   Map<String, dynamic> toJson() {
     return {
       'waktu': waktu,
@@ -77,7 +75,6 @@ class HafalanData {
     };
   }
 
-  // Create from JSON for caching
   factory HafalanData.fromJson(Map<String, dynamic> json) {
     return HafalanData(
       waktu: json['waktu'] ?? '',
@@ -96,54 +93,108 @@ class HafalanData {
 }
 
 class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
-  List<HafalanData> _recentData = [];
-  List<HafalanData> _allData = []; // Store all data for different sorting
+  // Pagination variables
+  List<HafalanData> _displayedData = []; // Data yang ditampilkan
+  List<HafalanData> _allData = []; // Semua data dari server
   bool _loading = true;
+  bool _loadingMore = false; // Loading untuk pagination
   String _error = '';
   String _currentNamaSantri = '';
   bool _isFromCache = false;
-  String _sortBy = 'newest'; // newest, oldest, name, grade
-  String _lastSuccessfulUrl = ''; // Track which URL worked
+  final String _sortBy = 'newest';
 
-  // PERBAIKAN: Multiple CSV URLs dengan berbagai format export
+  // Pagination settings
+  static const int _itemsPerPage = 10;
+  int _currentPage = 0;
+  bool _hasMoreData = true;
+
+  // ScrollController untuk detect scroll end
+  final ScrollController _scrollController = ScrollController();
+
   static const List<String> _csvUrls = [
-    // URL utama dengan gid spesifik
     'https://docs.google.com/spreadsheets/d/1BZbBczH2OY8SB2_1tDpKf_B8WvOyk8TJl4esfT-dgzw/export?format=csv&gid=2071598361',
-
-    // URL dengan export default (sheet pertama)
     'https://docs.google.com/spreadsheets/d/1BZbBczH2OY8SB2_1tDpKf_B8WvOyk8TJl4esfT-dgzw/export?format=csv',
-
-    // URL dengan format sharing alternatif
     'https://docs.google.com/spreadsheets/d/1BZbBczH2OY8SB2_1tDpKf_B8WvOyk8TJl4esfT-dgzw/gviz/tq?tqx=out:csv&gid=2071598361',
-
-    // URL dengan format TSV sebagai backup
     'https://docs.google.com/spreadsheets/d/1BZbBczH2OY8SB2_1tDpKf_B8WvOyk8TJl4esfT-dgzw/export?format=tsv&gid=2071598361',
-
-    // URL dengan format ODS sebagai backup terakhir
     'https://docs.google.com/spreadsheets/d/1BZbBczH2OY8SB2_1tDpKf_B8WvOyk8TJl4esfT-dgzw/export?format=ods',
   ];
 
-  // Cache duration: 5 menit (lebih pendek untuk testing)
   static const int CACHE_DURATION_MINUTES = 5;
 
   @override
   void initState() {
     super.initState();
-    // PERBAIKAN: Inisialisasi dengan delay untuk memastikan widget tree sudah siap
+    _scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initializeAndLoadData();
     });
   }
 
-  // PERBAIKAN: Method baru untuk inisialisasi yang lebih aman
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  // Detect when user scrolls to bottom
+  void _onScroll() {
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent - 200) {
+      _loadMoreData();
+    }
+  }
+
+  // Load more data for pagination
+  void _loadMoreData() {
+    if (_loadingMore || !_hasMoreData) return;
+
+    setState(() {
+      _loadingMore = true;
+    });
+
+    // Simulate loading delay (optional)
+    Future.delayed(Duration(milliseconds: 500), () {
+      _loadNextPage();
+    });
+  }
+
+  // Load next page of data
+  void _loadNextPage() {
+    if (!mounted) return;
+
+    int startIndex = (_currentPage + 1) * _itemsPerPage;
+    int endIndex = startIndex + _itemsPerPage;
+
+    if (startIndex >= _allData.length) {
+      // No more data
+      setState(() {
+        _hasMoreData = false;
+        _loadingMore = false;
+      });
+      return;
+    }
+
+    List<HafalanData> nextPageData = _allData
+        .skip(startIndex)
+        .take(_itemsPerPage)
+        .toList();
+
+    setState(() {
+      _displayedData.addAll(nextPageData);
+      _currentPage++;
+      _loadingMore = false;
+      _hasMoreData = endIndex < _allData.length;
+    });
+
+    print(
+      '📄 Loaded page ${_currentPage + 1}, showing ${_displayedData.length} of ${_allData.length} items',
+    );
+  }
+
   Future<void> _initializeAndLoadData() async {
     try {
-      // Pastikan Flutter engine sudah siap
       await Future.delayed(Duration(milliseconds: 100));
-
-      // Pastikan context masih valid
       if (!mounted) return;
-
       await _loadData();
     } catch (e) {
       print('💥 Error in initialization: $e');
@@ -156,7 +207,6 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
     }
   }
 
-  // Apply sorting based on current sort preference
   void _applySorting() {
     List<HafalanData> sortedData = List.from(_allData);
 
@@ -197,20 +247,14 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
         break;
       case 'grade':
         sortedData.sort((a, b) {
-          // Sort by grade (A > B > C > D > empty)
           String gradeA = a.nilai.toUpperCase();
           String gradeB = b.nilai.toUpperCase();
-
           Map<String, int> gradeOrder = {'A': 4, 'B': 3, 'C': 2, 'D': 1, '': 0};
-
           int orderA = gradeOrder[gradeA.isNotEmpty ? gradeA[0] : ''] ?? 0;
           int orderB = gradeOrder[gradeB.isNotEmpty ? gradeB[0] : ''] ?? 0;
-
           if (orderA != orderB) {
-            return orderB.compareTo(orderA); // Higher grade first
+            return orderB.compareTo(orderA);
           }
-
-          // If same grade, sort by newest date
           DateTime? dateA = _parseDateTime(a);
           DateTime? dateB = _parseDateTime(b);
           if (dateA != null && dateB != null) {
@@ -223,12 +267,15 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
 
     if (mounted) {
       setState(() {
-        _recentData = sortedData.take(10).toList();
+        _allData = sortedData;
+        // Reset pagination
+        _currentPage = 0;
+        _hasMoreData = _allData.length > _itemsPerPage;
+        _displayedData = _allData.take(_itemsPerPage).toList();
       });
     }
   }
 
-  // Load data from cache first, then fetch if needed
   Future<void> _loadData() async {
     try {
       if (mounted) {
@@ -238,7 +285,6 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
         });
       }
 
-      // Try to load from cache first
       bool cacheLoaded = await _loadFromCache();
 
       if (cacheLoaded) {
@@ -250,7 +296,6 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
           });
         }
 
-        // Check if cache is expired and refresh in background if needed
         if (await _isCacheExpired()) {
           print('🔄 Cache expired, refreshing in background...');
           _refreshDataInBackground();
@@ -270,26 +315,20 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
     }
   }
 
-  // PERBAIKAN: Load data from cache dengan error handling yang lebih baik
   Future<bool> _loadFromCache() async {
     try {
-      // PERBAIKAN: Gunakan getInstance dengan timeout dan error handling
       SharedPreferences? prefs;
 
       try {
-        // Timeout untuk getInstance
         prefs = await SharedPreferences.getInstance().timeout(
           Duration(seconds: 10),
         );
       } on Exception catch (e) {
         print('❌ SharedPreferences getInstance failed: $e');
-        // Jika SharedPreferences gagal, return false agar langsung fetch dari server
         return false;
       }
 
       String cacheKey = 'hafalan_data_${widget.nisn}';
-
-      // PERBAIKAN: Tambahkan try-catch untuk setiap operasi SharedPreferences
       String? cachedData;
       String? cachedTimestamp;
       String? cachedName;
@@ -303,7 +342,7 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
         return false;
       }
 
-      if (cachedData != null && cachedTimestamp != null) {
+      if (cachedTimestamp != null && cachedData != null) {
         try {
           List<dynamic> jsonList = json.decode(cachedData);
           List<HafalanData> hafalanList = jsonList
@@ -312,8 +351,11 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
 
           if (hafalanList.isNotEmpty && mounted) {
             setState(() {
-              _recentData = hafalanList;
-              _allData = hafalanList; // Store for sorting
+              _allData = hafalanList;
+              // Reset pagination for cache data
+              _currentPage = 0;
+              _hasMoreData = _allData.length > _itemsPerPage;
+              _displayedData = _allData.take(_itemsPerPage).toList();
               _currentNamaSantri =
                   cachedName ??
                   widget.namaSantri ??
@@ -323,7 +365,6 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
           }
         } catch (e) {
           print('❌ Error parsing cached data: $e');
-          // Jika parsing gagal, hapus cache yang rusak
           try {
             await prefs.remove(cacheKey);
             await prefs.remove('${cacheKey}_timestamp');
@@ -340,36 +381,30 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
     }
   }
 
-  // PERBAIKAN: Check if cache is expired dengan error handling
   Future<bool> _isCacheExpired() async {
     try {
       SharedPreferences? prefs;
-
       try {
         prefs = await SharedPreferences.getInstance().timeout(
           Duration(seconds: 5),
         );
       } catch (e) {
         print('❌ SharedPreferences getInstance failed in isCacheExpired: $e');
-        return true; // Anggap expired jika tidak bisa akses SharedPreferences
+        return true;
       }
 
       String cacheKey = 'hafalan_data_${widget.nisn}';
-
       try {
         String? cachedTimestamp = prefs.getString('${cacheKey}_timestamp');
+        if (cachedTimestamp == null) return true;
 
-        if (cachedTimestamp != null) {
-          DateTime cacheTime = DateTime.parse(cachedTimestamp);
-          DateTime now = DateTime.now();
-          Duration difference = now.difference(cacheTime);
-
-          return difference.inMinutes > CACHE_DURATION_MINUTES;
-        }
+        DateTime cacheTime = DateTime.parse(cachedTimestamp);
+        DateTime now = DateTime.now();
+        Duration difference = now.difference(cacheTime);
+        return difference.inMinutes > CACHE_DURATION_MINUTES;
       } catch (e) {
         print('❌ Error checking cache expiration: $e');
       }
-
       return true;
     } catch (e) {
       print('❌ General error in isCacheExpired: $e');
@@ -377,18 +412,15 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
     }
   }
 
-  // PERBAIKAN: Save data to cache dengan error handling yang lebih baik
   Future<void> _saveToCache(List<HafalanData> data, String namaSantri) async {
     try {
       SharedPreferences? prefs;
-
       try {
         prefs = await SharedPreferences.getInstance().timeout(
           Duration(seconds: 10),
         );
       } catch (e) {
         print('❌ SharedPreferences getInstance failed in saveToCache: $e');
-        // Jika tidak bisa save ke cache, tidak masalah - aplikasi tetap berjalan
         return;
       }
 
@@ -404,30 +436,24 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
           DateTime.now().toIso8601String(),
         );
         await prefs.setString('${cacheKey}_name', namaSantri);
-
         print('💾 Data saved to cache for NISN: ${widget.nisn}');
       } catch (e) {
         print('❌ Error writing to SharedPreferences: $e');
-        // Tidak throw error - biarkan aplikasi tetap berjalan tanpa cache
       }
     } catch (e) {
       print('❌ Error saving to cache: $e');
-      // Tidak throw error - cache adalah fitur optional
     }
   }
 
-  // PERBAIKAN: Clear cache untuk debugging dengan error handling
   Future<void> _clearCache() async {
     try {
       SharedPreferences? prefs;
-
       try {
         prefs = await SharedPreferences.getInstance().timeout(
           Duration(seconds: 10),
         );
       } catch (e) {
         print('❌ SharedPreferences getInstance failed in clearCache: $e');
-
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -437,27 +463,22 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
               backgroundColor: Colors.orange[600],
             ),
           );
-
-          // Langsung fetch dari server jika SharedPreferences bermasalah
           await _fetchFromServer(showLoading: true);
         }
         return;
       }
 
       String cacheKey = 'hafalan_data_${widget.nisn}';
-
       try {
         await prefs.remove(cacheKey);
         await prefs.remove('${cacheKey}_timestamp');
         await prefs.remove('${cacheKey}_name');
         await prefs.remove('last_successful_url');
-
         print('🗑️ Cache cleared for NISN: ${widget.nisn}');
       } catch (e) {
         print('❌ Error clearing cache: $e');
       }
 
-      // Show snackbar
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -465,13 +486,10 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
             backgroundColor: Colors.orange[600],
           ),
         );
-
-        // Reload data
         await _fetchFromServer(showLoading: true);
       }
     } catch (e) {
       print('❌ Error clearing cache: $e');
-
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -481,13 +499,11 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
             backgroundColor: Colors.red[600],
           ),
         );
-
         await _fetchFromServer(showLoading: true);
       }
     }
   }
 
-  // Refresh data in background without showing loading
   Future<void> _refreshDataInBackground() async {
     try {
       await _fetchFromServer(showLoading: false);
@@ -497,7 +513,6 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
     }
   }
 
-  // Manual refresh (pull to refresh or button)
   Future<void> _refreshData() async {
     await _fetchFromServer(showLoading: true);
   }
@@ -523,19 +538,16 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
         normalizedCsvNisn == normalizedTargetNisn;
   }
 
-  // Improved date parsing function with better edge case handling
   DateTime? _parseDateTime(HafalanData data) {
     try {
       String dateStr = data.tanggal.trim();
       String timeStr = data.waktu.trim();
 
-      // Skip empty dates
       if (dateStr.isEmpty) {
         print('⚠️ Empty date string');
         return null;
       }
 
-      // Handle combined date-time in tanggal field
       if (dateStr.contains(' ') && timeStr.isEmpty) {
         List<String> parts = dateStr.split(' ');
         dateStr = parts[0];
@@ -544,46 +556,44 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
         }
       }
 
-      // Handle various date formats
       DateTime? parsedDate;
 
-      // Try different date formats with more flexibility
       List<Map<String, dynamic>> dateFormats = [
         {
           'format': 'yyyy-MM-dd',
           'separator': '-',
           'order': ['year', 'month', 'day'],
-        }, // 2024-01-15
+        },
         {
           'format': 'dd/MM/yyyy',
           'separator': '/',
           'order': ['day', 'month', 'year'],
-        }, // 15/01/2024
+        },
         {
           'format': 'dd-MM-yyyy',
           'separator': '-',
           'order': ['day', 'month', 'year'],
-        }, // 15-01-2024
+        },
         {
           'format': 'MM/dd/yyyy',
           'separator': '/',
           'order': ['month', 'day', 'year'],
-        }, // 01/15/2024
+        },
         {
           'format': 'yyyy/MM/dd',
           'separator': '/',
           'order': ['year', 'month', 'day'],
-        }, // 2024/01/15
+        },
         {
           'format': 'd/M/yyyy',
           'separator': '/',
           'order': ['day', 'month', 'year'],
-        }, // 5/1/2024
+        },
         {
           'format': 'd-M-yyyy',
           'separator': '-',
           'order': ['day', 'month', 'year'],
-        }, // 5-1-2024
+        },
       ];
 
       for (Map<String, dynamic> formatInfo in dateFormats) {
@@ -599,7 +609,6 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
           }
 
           if (dateParts.length == 3) {
-            // Parse based on order
             int year = 0, month = 0, day = 0;
 
             for (int i = 0; i < 3; i++) {
@@ -607,7 +616,6 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
               switch (order[i]) {
                 case 'year':
                   year = value;
-                  // Handle 2-digit years
                   if (year < 100) {
                     year += (year < 50) ? 2000 : 1900;
                   }
@@ -621,7 +629,6 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
               }
             }
 
-            // Enhanced validation
             if (_isValidDate(year, month, day)) {
               parsedDate = DateTime(year, month, day);
               print(
@@ -635,7 +642,6 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
         }
       }
 
-      // If date parsing failed, try ISO format as last resort
       if (parsedDate == null) {
         try {
           parsedDate = DateTime.parse(dateStr);
@@ -648,15 +654,12 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
         }
       }
 
-      // Parse time if available
       if (timeStr.isNotEmpty && timeStr != dateStr) {
         try {
-          // Clean time string (remove extra spaces, handle AM/PM)
           String cleanTimeStr = timeStr.trim().toLowerCase();
           bool isPM = cleanTimeStr.contains('pm');
           bool isAM = cleanTimeStr.contains('am');
 
-          // Remove AM/PM markers
           cleanTimeStr = cleanTimeStr.replaceAll(RegExp(r'\s*(am|pm)\s*'), '');
 
           List<String> timeParts = cleanTimeStr.split(':');
@@ -667,7 +670,6 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
                 ? int.parse(timeParts[2].trim())
                 : 0;
 
-            // Handle 12-hour format
             if (isPM && hour != 12) {
               hour += 12;
             } else if (isAM && hour == 12) {
@@ -695,7 +697,6 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
           }
         } catch (e) {
           print('⚠️ Failed to parse time: $timeStr, error: $e');
-          // Keep the date part even if time parsing fails
         }
       }
 
@@ -706,16 +707,13 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
     }
   }
 
-  // Helper function to validate date
   bool _isValidDate(int year, int month, int day) {
     if (year < 1900 || year > 2100) return false;
     if (month < 1 || month > 12) return false;
     if (day < 1 || day > 31) return false;
 
-    // Check days in month
     List<int> daysInMonth = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
-    // Check for leap year
     bool isLeapYear = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
     if (isLeapYear && month == 2) {
       daysInMonth[1] = 29;
@@ -724,7 +722,6 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
     return day <= daysInMonth[month - 1];
   }
 
-  // PERBAIKAN: Try multiple URLs sequentially dengan timeout yang lebih baik
   Future<void> _fetchFromServer({bool showLoading = true}) async {
     try {
       if (showLoading && mounted) {
@@ -734,7 +731,6 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
         });
       }
 
-      // PERBAIKAN: Load last successful URL from preferences dengan error handling
       SharedPreferences? prefs;
       String? lastUrl;
 
@@ -745,12 +741,10 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
         lastUrl = prefs.getString('last_successful_url');
       } catch (e) {
         print('❌ Cannot access SharedPreferences for last URL: $e');
-        // Lanjutkan tanpa last successful URL
       }
 
       List<String> urlsToTry = List.from(_csvUrls);
 
-      // If we have a last successful URL, try it first
       if (lastUrl != null && _csvUrls.contains(lastUrl)) {
         urlsToTry.remove(lastUrl);
         urlsToTry.insert(0, lastUrl);
@@ -760,12 +754,10 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
       String? successfulUrl;
       String lastError = '';
 
-      // Try each URL until one works
       for (String url in urlsToTry) {
         try {
           print('🔄 Trying URL: $url');
 
-          // PERBAIKAN: Timeout yang lebih pendek dan error handling yang lebih baik
           response = await http
               .get(
                 Uri.parse(url),
@@ -775,7 +767,7 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
                   'Accept': 'text/csv,text/plain,application/csv,*/*',
                 },
               )
-              .timeout(Duration(seconds: 10)); // Reduced timeout
+              .timeout(Duration(seconds: 10));
 
           if (response.statusCode == 200 && response.body.isNotEmpty) {
             print('✅ Success with URL: $url');
@@ -798,33 +790,26 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
         throw Exception('Semua URL gagal diakses. Error terakhir: $lastError');
       }
 
-      // PERBAIKAN: Save successful URL for next time dengan error handling
       if (prefs != null) {
         try {
           await prefs.setString('last_successful_url', successfulUrl);
         } catch (e) {
           print('❌ Cannot save successful URL: $e');
-          // Tidak critical, lanjutkan
         }
       }
 
-      // Process CSV data
       List<List<dynamic>> csvData;
 
       try {
-        // Handle different formats
         if (successfulUrl.contains('format=tsv')) {
-          // TSV format
           csvData = CsvToListConverter(
             fieldDelimiter: '\t',
           ).convert(response.body);
         } else {
-          // CSV format (default)
           csvData = CsvToListConverter().convert(response.body);
         }
       } catch (e) {
         print('❌ CSV parsing error: $e');
-        // Try with different delimiters
         try {
           csvData = CsvToListConverter(
             fieldDelimiter: ';',
@@ -840,7 +825,6 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
         throw Exception('Data CSV kosong');
       }
 
-      // Skip header and filter by NISN
       final filtered = csvData
           .skip(1)
           .where((row) {
@@ -861,46 +845,32 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
       if (filtered.isNotEmpty) {
         String namaSantri = widget.namaSantri ?? filtered.first.namaSantri;
 
-        // Sort by date (newest first)
         filtered.sort((a, b) {
           DateTime? dateA = _parseDateTime(a);
           DateTime? dateB = _parseDateTime(b);
 
-          // Handle null dates (put them at the end)
           if (dateA == null && dateB == null) {
-            // Fallback to string comparison
             String fullA = '${a.tanggal} ${a.waktu}';
             String fullB = '${b.tanggal} ${b.waktu}';
             return fullB.compareTo(fullA);
           } else if (dateA == null) {
-            return 1; // a goes after b
+            return 1;
           } else if (dateB == null) {
-            return -1; // a goes before b
+            return -1;
           } else {
-            // Both dates are valid, sort newest first
             return dateB.compareTo(dateA);
           }
         });
 
-        // Take only the most recent 10 records for display
-        List<HafalanData> recentData = filtered.take(10).toList();
-
-        // Debug: Print sorted dates
-        print('📅 Sorted data (newest first):');
-        for (int i = 0; i < recentData.length && i < 5; i++) {
-          DateTime? parsed = _parseDateTime(recentData[i]);
-          print(
-            '${i + 1}. ${recentData[i].tanggal} ${recentData[i].waktu} -> $parsed',
-          );
-        }
-
-        // Save to cache (save all filtered data, not just recent)
         await _saveToCache(filtered, namaSantri);
 
         if (mounted) {
           setState(() {
-            _recentData = recentData;
-            _allData = filtered; // Store all data for sorting
+            _allData = filtered;
+            // Reset pagination
+            _currentPage = 0;
+            _hasMoreData = _allData.length > _itemsPerPage;
+            _displayedData = _allData.take(_itemsPerPage).toList();
             _currentNamaSantri = namaSantri;
             _loading = false;
             _isFromCache = false;
@@ -945,7 +915,7 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
   String _formatTime(String datetime) {
     try {
       if (datetime.contains(' ')) {
-        return datetime.split(' ')[1].substring(0, 5); // HH:MM
+        return datetime.split(' ')[1].substring(0, 5);
       }
       return datetime;
     } catch (e) {
@@ -962,7 +932,6 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
   }
 
   Widget _buildSimpleCard(HafalanData data, int index) {
-    // Check if this is from today or recent
     bool isToday = false;
     bool isRecent = false;
 
@@ -1003,14 +972,12 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header dengan tanggal, indikator, dan nilai
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Expanded(
                   child: Row(
                     children: [
-                      // Ranking indicator
                       if (index < 3)
                         Container(
                           margin: EdgeInsets.only(right: 8),
@@ -1036,7 +1003,6 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
                           ),
                         ),
 
-                      // Date indicator
                       if (isToday)
                         Container(
                           margin: EdgeInsets.only(right: 6),
@@ -1127,7 +1093,6 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
 
             SizedBox(height: 12),
 
-            // Mustami
             Row(
               children: [
                 Icon(Icons.person, size: 18, color: Colors.teal[600]),
@@ -1153,7 +1118,6 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
 
             SizedBox(height: 8),
 
-            // Setoran
             Row(
               children: [
                 Icon(Icons.book, size: 18, color: Colors.blue[600]),
@@ -1171,7 +1135,6 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
               ],
             ),
 
-            // Keterangan
             if (data.keterangan.isNotEmpty) ...[
               SizedBox(height: 8),
               Row(
@@ -1198,42 +1161,65 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
     );
   }
 
+  // Widget untuk loading indicator saat memuat data lebih banyak
+  Widget _buildLoadingMoreIndicator() {
+    return Container(
+      padding: EdgeInsets.all(16),
+      child: Center(
+        child: Column(
+          children: [
+            CircularProgressIndicator(color: Colors.teal[600], strokeWidth: 2),
+            SizedBox(height: 8),
+            Text(
+              'Memuat data lainnya...',
+              style: TextStyle(color: Colors.grey[600], fontSize: 12),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Widget untuk end of data indicator
+  Widget _buildEndOfDataIndicator() {
+    return Container(
+      padding: EdgeInsets.all(16),
+      child: Center(
+        child: Column(
+          children: [
+            Icon(Icons.done_all, color: Colors.grey[400], size: 24),
+            SizedBox(height: 8),
+            Text(
+              'Semua data telah dimuat',
+              style: TextStyle(color: Colors.grey[500], fontSize: 12),
+            ),
+            Text(
+              '(${_displayedData.length} dari ${_allData.length} total)',
+              style: TextStyle(color: Colors.grey[400], fontSize: 10),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.grey[100],
       appBar: AppBar(
-        leading: IconButton(
-          icon: Container(
-            padding: EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
-                  blurRadius: 4,
-                  offset: Offset(0, 2),
-                ),
-              ],
-            ),
-            child: Icon(
-              Icons.arrow_back_ios_new,
-              color: Colors.grey[700],
-              size: 18,
-            ),
-          ),
-          onPressed: () => Navigator.pop(context),
-        ),
         title: Text(
           'Riwayat Hafalan',
-          style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w600,
+            fontSize: 18,
+          ),
         ),
         backgroundColor: Colors.teal[600],
         iconTheme: IconThemeData(color: Colors.white),
         elevation: 0,
         actions: [
-          // Show cache indicator
           if (_isFromCache)
             Container(
               margin: EdgeInsets.only(right: 8),
@@ -1256,7 +1242,6 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
               ),
             ),
 
-          // Debug: Clear cache button (hanya untuk testing)
           PopupMenuButton<String>(
             icon: Icon(Icons.more_vert, color: Colors.white),
             onSelected: (value) {
@@ -1293,7 +1278,6 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
       ),
       body: Column(
         children: [
-          // Minimal Header - Santri Info Only
           if (_currentNamaSantri.isNotEmpty)
             Container(
               width: double.infinity,
@@ -1349,7 +1333,7 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(
-                      '${_recentData.length} setoran',
+                      '${_allData.length} total',
                       style: TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.w600,
@@ -1361,7 +1345,6 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
               ),
             ),
 
-          // Content
           Expanded(
             child: _loading
                 ? Center(
@@ -1435,54 +1418,11 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
                               ),
                             ],
                           ),
-                          SizedBox(height: 16),
-                          Container(
-                            padding: EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: Colors.blue[50],
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.blue[200]!),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Icon(
-                                      Icons.info_outline,
-                                      size: 16,
-                                      color: Colors.blue[600],
-                                    ),
-                                    SizedBox(width: 4),
-                                    Text(
-                                      'Tips Troubleshooting:',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.blue[700],
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                SizedBox(height: 4),
-                                Text(
-                                  '• Pastikan koneksi internet stabil\n'
-                                  '• Coba clear cache jika data lama\n'
-                                  '• Periksa apakah NISN sudah benar\n'
-                                  '• Hubungi admin jika masih bermasalah',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: Colors.blue[600],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
                         ],
                       ),
                     ),
                   )
-                : _recentData.isEmpty
+                : _allData.isEmpty
                 ? Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -1519,7 +1459,6 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
                     color: Colors.teal[600],
                     child: Column(
                       children: [
-                        // Header info
                         Container(
                           padding: EdgeInsets.symmetric(
                             horizontal: 20,
@@ -1534,9 +1473,9 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
                               ),
                               SizedBox(width: 8),
                               Text(
-                                '10 Setoran Terakhir',
+                                'Menampilkan ${_displayedData.length} dari ${_allData.length} setoran',
                                 style: TextStyle(
-                                  fontSize: 16,
+                                  fontSize: 14,
                                   fontWeight: FontWeight.bold,
                                   color: Colors.teal[700],
                                 ),
@@ -1565,14 +1504,28 @@ class _HafalanHistoryPageState extends State<HafalanHistoryPage> {
                           ),
                         ),
 
-                        // List data
                         Expanded(
                           child: ListView.builder(
+                            controller: _scrollController,
                             padding: EdgeInsets.only(bottom: 16),
-                            itemCount: _recentData.length,
+                            itemCount:
+                                _displayedData.length +
+                                1, // +1 for loading indicator
                             itemBuilder: (context, index) {
+                              // Show loading indicator at the end
+                              if (index == _displayedData.length) {
+                                if (_loadingMore) {
+                                  return _buildLoadingMoreIndicator();
+                                } else if (!_hasMoreData &&
+                                    _displayedData.isNotEmpty) {
+                                  return _buildEndOfDataIndicator();
+                                } else {
+                                  return SizedBox.shrink();
+                                }
+                              }
+
                               return _buildSimpleCard(
-                                _recentData[index],
+                                _displayedData[index],
                                 index,
                               );
                             },
