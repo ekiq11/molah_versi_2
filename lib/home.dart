@@ -465,7 +465,7 @@ class _HomeScreenState extends State<HomeScreen>
         'memorization',
         'jumlah_hafalan',
         'juz',
-      ], '0 JUZ'),
+      ], '0'),
       'absensi': _getFieldValue(row, headers, [
         'absensi',
         'attendance',
@@ -889,6 +889,7 @@ class _HomeScreenState extends State<HomeScreen>
       context: context,
       currentBalance: _santriData['saldo'] ?? '0',
       nisn: widget.username,
+      namaSantri: _santriData['nama'],
     );
   }
 

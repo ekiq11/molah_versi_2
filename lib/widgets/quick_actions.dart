@@ -7,7 +7,7 @@ import 'package:molahv2/screens/spp.dart';
 class QuickActions extends StatelessWidget {
   final String nisn;
 
-  QuickActions({Key? key, required this.nisn}) : super(key: key);
+  const QuickActions({super.key, required this.nisn});
 
   @override
   Widget build(BuildContext context) {
@@ -15,7 +15,7 @@ class QuickActions extends StatelessWidget {
     final screenSize = MediaQuery.of(context).size;
     final bool isSmallScreen = screenSize.width < 360;
     final bool isLargeScreen = screenSize.width > 600;
-    void _navigateToEkskulPayment(
+    void navigateToEkskulPayment(
       BuildContext context,
       String nisn,
       String studentName,
@@ -59,7 +59,7 @@ class QuickActions extends StatelessWidget {
                 ? 36.0
                 : (isLargeScreen ? 50.0 : 42.0);
 
-            return Container(
+            return SizedBox(
               height: cardHeight,
               child: ListView(
                 scrollDirection: Axis.horizontal,

@@ -24,7 +24,7 @@ class DataFetcher {
           List<dynamic> row = csvTable[i];
 
           // Ambil NISN dari CSV dan username untuk comparison
-          String csvNisn = row.length > 0 ? row[0].toString().trim() : '';
+          String csvNisn = row.isNotEmpty ? row[0].toString().trim() : '';
           String loginUsername = username.toString().trim();
 
           // Debug: Print setiap baris untuk melihat data

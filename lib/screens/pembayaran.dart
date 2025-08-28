@@ -25,6 +25,7 @@ class _PaymentPageState extends State<PaymentPage>
   late Animation<double> _slideAnimation;
   late Animation<double> _shimmerAnimation;
   bool _isLoading = true;
+  bool _isProcessing = false;
 
   final String _whatsappNumber = '+6281237804124';
   final String _bankAccount = '7269288153';
@@ -111,33 +112,185 @@ class _PaymentPageState extends State<PaymentPage>
     );
   }
 
+  // FIXED: Improved WhatsApp message with better formatting and multiple launch methods
   Future<void> _sendWhatsAppMessage() async {
-    final String message =
-        "Assalamualaikum, Saya atas nama Wali dari *${widget.studentName}*\n"
-        "(${widget.username}) ingin melakukan pembayaran $_selectedPaymentType, "
-        "berikut bukti pembayarannya. Jazakumullahu khairan";
-
-    final String encodedMessage = Uri.encodeComponent(message);
-    final String whatsappUrl =
-        "https://wa.me/$_whatsappNumber?text=$encodedMessage";
+    setState(() {
+      _isProcessing = true;
+    });
 
     try {
-      HapticFeedback.mediumImpact();
-      if (await canLaunchUrl(Uri.parse(whatsappUrl))) {
-        await launchUrl(
-          Uri.parse(whatsappUrl),
-          mode: LaunchMode.externalApplication,
-        );
-      } else {
-        if (mounted) {
-          _showErrorSnackBar('WhatsApp tidak dapat dibuka');
+      // Clean and format the WhatsApp number
+      final String cleanNumber = _whatsappNumber
+          .replaceAll('+', '')
+          .replaceAll(' ', '');
+
+      // Create well-formatted message
+      final String message = _createFormattedMessage();
+      final String encodedMessage = Uri.encodeComponent(message);
+
+      // Multiple WhatsApp URL schemes to try
+      final List<String> whatsappUrls = [
+        "whatsapp://send?phone=$cleanNumber&text=$encodedMessage",
+        "https://wa.me/$cleanNumber?text=$encodedMessage",
+        "https://api.whatsapp.com/send?phone=$cleanNumber&text=$encodedMessage",
+      ];
+
+      bool launched = false;
+
+      // Try each URL scheme
+      for (String urlString in whatsappUrls) {
+        try {
+          final Uri url = Uri.parse(urlString);
+
+          if (await canLaunchUrl(url)) {
+            launched = await launchUrl(
+              url,
+              mode: LaunchMode.externalApplication,
+            );
+            if (launched) {
+              print('Successfully launched WhatsApp with URL: $urlString');
+              _showSuccessMessage();
+              break;
+            }
+          }
+        } catch (e) {
+          print('Failed to launch URL $urlString: $e');
+          continue;
         }
       }
-    } catch (e) {
-      if (mounted) {
-        _showErrorSnackBar('Error: ${e.toString()}');
+
+      if (!launched) {
+        throw 'Tidak dapat membuka WhatsApp. Pastikan WhatsApp sudah terinstall.';
       }
+    } catch (e) {
+      print('Error opening WhatsApp: $e');
+      _showErrorDialog(e.toString());
+    } finally {
+      setState(() {
+        _isProcessing = false;
+      });
     }
+  }
+
+  String _createFormattedMessage() {
+    return "Assalamualaikum Warahmatullahi Wabarakatuh\n\n"
+        "Saya sebagai wali santri ingin melakukan konfirmasi pembayaran dengan rincian sebagai berikut:\n\n"
+        "📝 DETAIL SANTRI:\n"
+        "• Nama Santri: ${widget.studentName}\n"
+        "• NISN: ${widget.username}\n\n"
+        "💰 DETAIL PEMBAYARAN:\n"
+        "• Jenis Pembayaran: $_selectedPaymentType\n"
+        "• Bank Tujuan: $_bankName\n"
+        "• No. Rekening: $_bankAccount\n"
+        "• Atas Nama: $_accountName\n\n"
+        "📎 Bukti transfer akan saya kirimkan setelah pesan ini.\n\n"
+        "Mohon untuk diverifikasi. Jazakumullahu khairan.\n\n"
+        "Wassalamualaikum Warahmatullahi Wabarakatuh";
+  }
+
+  // Alternative manual method if automatic launch fails
+  Future<void> _sendWhatsAppManual() async {
+    final String message = _createFormattedMessage();
+
+    Clipboard.setData(ClipboardData(text: message));
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(Icons.message, color: Colors.green[600]),
+            const SizedBox(width: 8),
+            const Text('Buka WhatsApp Manual'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Pesan sudah disalin ke clipboard.'),
+            const SizedBox(height: 16),
+            const Text(
+              'Langkah selanjutnya:',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 8),
+            Text('1. Buka WhatsApp'),
+            Text('2. Cari nomor: $_whatsappNumber'),
+            Text('3. Paste pesan yang sudah disalin'),
+            Text('4. Kirim pesan dan bukti transfer'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Mengerti'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showSuccessMessage() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.check_circle, color: Colors.white, size: 20),
+            const SizedBox(width: 8),
+            const Text('WhatsApp berhasil dibuka'),
+          ],
+        ),
+        backgroundColor: Colors.green[600],
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        margin: const EdgeInsets.all(16),
+      ),
+    );
+  }
+
+  void _showErrorDialog(String error) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(Icons.error_outline, color: primaryRed),
+            const SizedBox(width: 8),
+            const Text('Gagal Membuka WhatsApp'),
+          ],
+        ),
+        content: Text(
+          'Tidak dapat membuka WhatsApp otomatis.\n\n'
+          'Silakan pilih:\n'
+          '1. Coba lagi\n'
+          '2. Buka manual\n'
+          '3. Pastikan WhatsApp sudah terinstall',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Tutup'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _sendWhatsAppManual();
+            },
+            child: const Text('Buka Manual'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _sendWhatsAppMessage();
+            },
+            child: const Text('Coba Lagi'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showErrorSnackBar(String message) {
@@ -695,22 +848,22 @@ class _PaymentPageState extends State<PaymentPage>
             ],
           ),
           const SizedBox(height: 16),
-          const _InstructionStep(
+          _InstructionStep(
             1,
             'Transfer ke rekening BSI yang tertera di atas',
             Icons.account_balance_wallet,
           ),
-          const _InstructionStep(
+          _InstructionStep(
             2,
             'Screenshot atau simpan bukti transfer',
             Icons.screenshot,
           ),
-          const _InstructionStep(
+          _InstructionStep(
             3,
             'Klik tombol "Konfirmasi WhatsApp" di bawah',
             Icons.message,
           ),
-          const _InstructionStep(
+          _InstructionStep(
             4,
             'Kirim bukti transfer beserta data Santri',
             Icons.send,
@@ -741,7 +894,7 @@ class _PaymentPageState extends State<PaymentPage>
               width: double.infinity,
               decoration: BoxDecoration(
                 gradient: const LinearGradient(
-                  colors: [Color(0xFF25D366), Color(0xFF25D366)],
+                  colors: [Color(0xFF10B981), Color(0xFF10B981)],
                   begin: Alignment.centerLeft,
                   end: Alignment.centerRight,
                 ),
@@ -755,7 +908,7 @@ class _PaymentPageState extends State<PaymentPage>
                 ],
               ),
               child: ElevatedButton(
-                onPressed: _sendWhatsAppMessage,
+                onPressed: _isProcessing ? null : _sendWhatsAppMessage,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.transparent,
                   shadowColor: Colors.transparent,
@@ -764,21 +917,46 @@ class _PaymentPageState extends State<PaymentPage>
                     borderRadius: BorderRadius.circular(16),
                   ),
                 ),
-                child: const Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.call, size: 24, color: Colors.white),
-                    SizedBox(width: 12),
-                    Text(
-                      'Konfirmasi via WhatsApp',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white,
+                child: _isProcessing
+                    ? Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                Colors.white,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          const Text(
+                            'Membuka WhatsApp...',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ],
+                      )
+                    : const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.call, size: 24, color: Colors.white),
+                          SizedBox(width: 12),
+                          Text(
+                            'Konfirmasi via WhatsApp',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                  ],
-                ),
               ),
             ),
             const SizedBox(height: 8),
@@ -803,7 +981,7 @@ class _InstructionStep extends StatelessWidget {
   final String text;
   final IconData icon;
 
-  const _InstructionStep(this.number, this.text, this.icon);
+  const _InstructionStep(this.number, this.text, this.icon, {super.key});
 
   @override
   Widget build(BuildContext context) {

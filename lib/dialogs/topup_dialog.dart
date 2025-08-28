@@ -8,6 +8,7 @@ class TopUpDialog {
     required BuildContext context,
     required String currentBalance,
     required String nisn,
+    required String namaSantri,
   }) async {
     List<int> quickAmounts = [
       10000,
@@ -173,7 +174,7 @@ class TopUpDialog {
                                 ),
                                 SizedBox(height: 4),
                                 Text(
-                                  'Rp.$currentBalance',
+                                  '$currentBalance',
                                   style: TextStyle(
                                     fontSize: isSmallScreen ? 16 : 20,
                                     fontWeight: FontWeight.w700,
@@ -342,7 +343,9 @@ class TopUpDialog {
                                                   PaymentConfirmationScreen(
                                                     amount:
                                                         finalAmount, // Pass clean amount
-                                                    nisn: nisn, // Pass NISN
+                                                    nisn: nisn,
+                                                    namaSantri:
+                                                        namaSantri, // Pass NISN
                                                   ),
                                             ),
                                           );

@@ -309,7 +309,6 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
   String _currentKelasAsrama = '';
   bool _isFromCache = false;
   String _selectedTab = 'semua';
-
   late AnimationController _headerAnimationController;
   late Animation<double> _headerSlideAnimation;
   late Animation<double> _headerFadeAnimation;
@@ -317,7 +316,6 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
   // Updated Google Sheets URL
   static const String csvUrl =
       'https://docs.google.com/spreadsheets/d/1BZbBczH2OY8SB2_1tDpKf_B8WvOyk8TJl4esfT-dgzw/export?format=csv&gid=1620978739';
-
   static const int CACHE_DURATION_MINUTES = 15;
 
   @override
@@ -332,14 +330,12 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
       duration: Duration(milliseconds: 1200),
       vsync: this,
     );
-
     _headerSlideAnimation = Tween<double>(begin: -50, end: 0).animate(
       CurvedAnimation(
         parent: _headerAnimationController,
         curve: Curves.easeOutBack,
       ),
     );
-
     _headerFadeAnimation = Tween<double>(begin: 0, end: 1).animate(
       CurvedAnimation(parent: _headerAnimationController, curve: Curves.easeIn),
     );
@@ -357,7 +353,6 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
         _loading = true;
         _error = '';
       });
-
       bool cacheLoaded = await _loadFromCache();
       if (cacheLoaded) {
         setState(() {
@@ -387,13 +382,11 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
       String? cachedTimestamp = prefs.getString('${cacheKey}_timestamp');
       String? cachedName = prefs.getString('${cacheKey}_name');
       String? cachedKelas = prefs.getString('${cacheKey}_kelas');
-
       if (cachedTimestamp != null) {
         List<dynamic> jsonList = json.decode(cachedData!);
         List<RewardPelanggaranData> dataList = jsonList
             .map((item) => RewardPelanggaranData.fromJson(item))
             .toList();
-
         if (dataList.isNotEmpty) {
           _processData(dataList);
           setState(() {
@@ -415,11 +408,9 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
       SharedPreferences prefs = await SharedPreferences.getInstance();
       String cacheKey = 'reward_pelanggaran_${widget.nisn}';
       String? cachedTimestamp = prefs.getString('${cacheKey}_timestamp');
-
       DateTime cacheTime = DateTime.parse(cachedTimestamp!);
       return DateTime.now().difference(cacheTime).inMinutes >
           CACHE_DURATION_MINUTES;
-      return true;
     } catch (e) {
       return true;
     }
@@ -433,7 +424,6 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
     try {
       SharedPreferences prefs = await SharedPreferences.getInstance();
       String cacheKey = 'reward_pelanggaran_${widget.nisn}';
-
       List<Map<String, dynamic>> jsonList = data
           .map((item) => item.toJson())
           .toList();
@@ -473,7 +463,6 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
     String cleanedCsvNisn = csvNisn.replaceAll("'", "").trim();
     String normalizedCsvNisn = _normalizeNisn(csvNisn);
     String normalizedTargetNisn = _normalizeNisn(targetNisn);
-
     return cleanedCsvNisn == targetNisn ||
         cleanedCsvNisn == normalizedTargetNisn ||
         normalizedCsvNisn == targetNisn ||
@@ -484,18 +473,15 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
     try {
       String dateStr = data.hariTanggal.trim();
       if (dateStr.isEmpty) return null;
-
       List<RegExp> datePatterns = [
         RegExp(r'(\d{1,2})/(\d{1,2})/(\d{4})'),
         RegExp(r'(\d{4})-(\d{1,2})-(\d{1,2})'),
         RegExp(r'(\d{1,2})-(\d{1,2})-(\d{4})'),
       ];
-
       for (RegExp pattern in datePatterns) {
         RegExpMatch? match = pattern.firstMatch(dateStr);
         if (match != null) {
           int day, month, year;
-
           if (pattern == datePatterns[1]) {
             year = int.parse(match.group(1)!);
             month = int.parse(match.group(2)!);
@@ -505,7 +491,6 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
             month = int.parse(match.group(2)!);
             year = int.parse(match.group(3)!);
           }
-
           if (_isValidDate(year, month, day)) {
             return DateTime(year, month, day);
           }
@@ -532,7 +517,6 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
           _error = '';
         });
       }
-
       final res = await http.get(Uri.parse(csvUrl));
       if (res.statusCode == 200) {
         final data = CsvToListConverter().convert(res.body);
@@ -546,12 +530,10 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
               )
               .map((row) => RewardPelanggaranData.fromCsvRow(row))
               .toList();
-
           if (filtered.isNotEmpty) {
             filtered.sort((a, b) {
               DateTime? dateA = _parseDateTime(a);
               DateTime? dateB = _parseDateTime(b);
-
               if (dateA == null && dateB == null) {
                 return b.hariTanggal.compareTo(a.hariTanggal);
               } else if (dateA == null) {
@@ -562,11 +544,9 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
                 return dateB.compareTo(dateA);
               }
             });
-
             String namaSantri = widget.namaSantri ?? filtered.first.namaSantri;
             String kelasAsrama = filtered.first.kelasAsrama;
             await _saveToCache(filtered, namaSantri, kelasAsrama);
-
             _processData(filtered);
             setState(() {
               _currentNamaSantri = namaSantri;
@@ -574,7 +554,6 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
               _loading = false;
               _isFromCache = false;
             });
-
             if (showLoading) {
               _headerAnimationController.forward();
             }
@@ -619,11 +598,9 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
     String displayName = _currentNamaSantri.isNotEmpty
         ? _currentNamaSantri
         : (widget.namaSantri ?? '');
-
     if (displayName.isEmpty && _currentKelasAsrama.isEmpty) {
       return SizedBox.shrink();
     }
-
     return AnimatedBuilder(
       animation: _headerAnimationController,
       builder: (context, child) {
@@ -657,7 +634,6 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
                 padding: EdgeInsets.all(20),
                 child: Row(
                   children: [
-                    // Enhanced Avatar - Made more proportional
                     Hero(
                       tag: 'student_avatar_${widget.nisn}',
                       child: Container(
@@ -706,16 +682,12 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
                         ),
                       ),
                     ),
-
                     SizedBox(width: 16),
-
-                    // Student Information - Improved layout
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          // Student Name
                           if (displayName.isNotEmpty)
                             Text(
                               displayName,
@@ -736,15 +708,11 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                             ),
-
                           SizedBox(height: 8),
-
-                          // Information Row - More compact
                           Wrap(
                             spacing: 8,
                             runSpacing: 6,
                             children: [
-                              // NISN Badge
                               Container(
                                 padding: EdgeInsets.symmetric(
                                   horizontal: 10,
@@ -778,8 +746,6 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
                                   ],
                                 ),
                               ),
-
-                              // Class/Asrama Information
                               if (_currentKelasAsrama.isNotEmpty)
                                 Container(
                                   padding: EdgeInsets.symmetric(
@@ -819,14 +785,10 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
                         ],
                       ),
                     ),
-
                     SizedBox(width: 12),
-
-                    // Action buttons - Vertical layout for better proportion
                     Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        // Cache indicator
                         if (_isFromCache)
                           Container(
                             padding: EdgeInsets.all(8),
@@ -840,10 +802,7 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
                               size: 16,
                             ),
                           ),
-
                         if (_isFromCache) SizedBox(height: 6),
-
-                        // Refresh button
                         GestureDetector(
                           onTap: _refreshData,
                           child: Container(
@@ -877,7 +836,6 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
 
   Widget _buildTabButton(String value, String label, int count, IconData icon) {
     bool isSelected = _selectedTab == value;
-
     return Expanded(
       child: GestureDetector(
         onTap: () => setState(() => _selectedTab = value),
@@ -919,7 +877,6 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Icon with subtle animation
               AnimatedScale(
                 scale: isSelected ? 1.1 : 1.0,
                 duration: Duration(milliseconds: 200),
@@ -931,10 +888,7 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
                   size: 24,
                 ),
               ),
-
               SizedBox(height: 8),
-
-              // Label text
               Text(
                 label,
                 style: TextStyle(
@@ -949,10 +903,7 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
-
               SizedBox(height: 6),
-
-              // Count badge
               Container(
                 padding: EdgeInsets.symmetric(horizontal: 10, vertical: 3),
                 decoration: BoxDecoration(
@@ -993,7 +944,6 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
   Widget _buildDataCard(RewardPelanggaranData data, int index) {
     bool isReward = data.isReward;
     bool isToday = false;
-
     DateTime? parsedDate = _parseDateTime(data);
     if (parsedDate != null) {
       DateTime now = DateTime.now();
@@ -1005,7 +955,6 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
       );
       isToday = cardDate == today;
     }
-
     return TweenAnimationBuilder(
       duration: Duration(milliseconds: 400 + (index * 80)),
       tween: Tween<double>(begin: 0, end: 1),
@@ -1040,7 +989,6 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
                 borderRadius: BorderRadius.circular(24),
                 child: Stack(
                   children: [
-                    // Background gradient for today's items
                     if (isToday)
                       Positioned.fill(
                         child: Container(
@@ -1059,13 +1007,11 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
                           ),
                         ),
                       ),
-
                     Padding(
                       padding: EdgeInsets.all(24),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Header
                           Row(
                             children: [
                               Container(
@@ -1119,7 +1065,6 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
                                   ],
                                 ),
                               ),
-
                               if (isToday) ...[
                                 SizedBox(width: 10),
                                 Container(
@@ -1157,10 +1102,7 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
                                   ),
                                 ),
                               ],
-
                               Spacer(),
-
-                              // Points badge
                               if (isReward && data.jumlahReward.isNotEmpty)
                                 Container(
                                   padding: EdgeInsets.symmetric(
@@ -1242,10 +1184,7 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
                                 ),
                             ],
                           ),
-
                           SizedBox(height: 20),
-
-                          // Main content
                           if (data.jenisEtika.isNotEmpty)
                             Container(
                               width: double.infinity,
@@ -1278,7 +1217,6 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
                                 ),
                               ),
                             ),
-
                           if (data.rincianKejadian.isNotEmpty) ...[
                             SizedBox(height: 16),
                             Text(
@@ -1291,10 +1229,7 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
                               ),
                             ),
                           ],
-
                           SizedBox(height: 20),
-
-                          // Details section
                           Container(
                             padding: EdgeInsets.all(16),
                             decoration: BoxDecoration(
@@ -1307,7 +1242,6 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
                             ),
                             child: Column(
                               children: [
-                                // Date and time
                                 Row(
                                   children: [
                                     Container(
@@ -1360,7 +1294,6 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
                                     ],
                                   ],
                                 ),
-
                                 if (data.tempatKejadian.isNotEmpty) ...[
                                   SizedBox(height: 16),
                                   Row(
@@ -1393,7 +1326,6 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
                                     ],
                                   ),
                                 ],
-
                                 if (data.ustadzGuru.isNotEmpty) ...[
                                   SizedBox(height: 16),
                                   Row(
@@ -1453,60 +1385,34 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Color(0xFFF8F9FE),
+      appBar: AppBar(
+        backgroundColor: Color(0xFFF8F9FE),
+        elevation: 0,
+        leading: IconButton(
+          icon: Icon(
+            Icons.arrow_back_ios_new_rounded,
+            color: Colors.grey[700],
+            size: 20,
+          ),
+          onPressed: () => Navigator.pop(context),
+        ),
+        centerTitle: true,
+        title: Text(
+          'Reward & Pelanggaran',
+          style: TextStyle(
+            color: Colors.grey[800],
+            fontWeight: FontWeight.bold,
+            fontSize: 18,
+          ),
+        ),
+      ),
       body: RefreshIndicator(
         onRefresh: _refreshData,
         color: Color(0xFF667eea),
         child: CustomScrollView(
           physics: AlwaysScrollableScrollPhysics(),
           slivers: [
-            // App Bar
-            SliverAppBar(
-              expandedHeight: 100,
-              floating: false,
-              pinned: true,
-              elevation: 0,
-              backgroundColor: Color(0xFFF8F9FE),
-              leading: Padding(
-                padding: EdgeInsets.all(8.0),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.1),
-                        blurRadius: 8,
-                        offset: Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: IconButton(
-                    icon: Icon(
-                      Icons.arrow_back_ios_new_rounded,
-                      color: Colors.grey[700],
-                      size: 20,
-                    ),
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                ),
-              ),
-              flexibleSpace: FlexibleSpaceBar(
-                centerTitle: true,
-                title: Text(
-                  'Reward & Pelanggaran',
-                  style: TextStyle(
-                    color: Colors.grey[800],
-                    fontWeight: FontWeight.bold,
-                    fontSize: 18,
-                  ),
-                ),
-              ),
-            ),
-
-            // Student Header
             SliverToBoxAdapter(child: _buildStudentHeader()),
-
-            // Tab buttons
             SliverToBoxAdapter(
               child: Container(
                 padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -1536,8 +1442,6 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
                 ),
               ),
             ),
-
-            // Content
             _loading
                 ? SliverList(
                     delegate: SliverChildBuilderDelegate(
@@ -1664,8 +1568,6 @@ class _RewardPelanggaranPageState extends State<RewardPelanggaranPage>
                       childCount: _currentData.length,
                     ),
                   ),
-
-            // Bottom spacing
             SliverToBoxAdapter(child: SizedBox(height: 24)),
           ],
         ),

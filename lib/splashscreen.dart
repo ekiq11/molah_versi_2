@@ -372,7 +372,7 @@ class _SplashScreenState extends State<SplashScreen>
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(
-                      'Debug: $_debugInfo',
+                      'Checking: Mohon tunggu...\n',
                       style: const TextStyle(
                         color: Colors.white54,
                         fontSize: 10,

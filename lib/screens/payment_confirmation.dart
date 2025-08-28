@@ -5,12 +5,14 @@ import 'package:url_launcher/url_launcher.dart';
 class PaymentConfirmationScreen extends StatefulWidget {
   final String amount;
   final String nisn;
+  final String namaSantri;
 
   const PaymentConfirmationScreen({
-    Key? key,
+    super.key,
     required this.amount,
     required this.nisn,
-  }) : super(key: key);
+    required this.namaSantri,
+  });
 
   @override
   _PaymentConfirmationScreenState createState() =>
@@ -71,7 +73,7 @@ class _PaymentConfirmationScreenState extends State<PaymentConfirmationScreen>
 
   void _generateTransactionCode() {
     final now = DateTime.now();
-    _transactionCode = '${now.millisecondsSinceEpoch.toString().substring(7)}';
+    _transactionCode = now.millisecondsSinceEpoch.toString().substring(7);
     print('Generated transaction code: $_transactionCode');
   }
 
@@ -199,6 +201,7 @@ class _PaymentConfirmationScreenState extends State<PaymentConfirmationScreen>
     );
   }
 
+  // FIXED: Improved WhatsApp launch method with better error handling
   Future<void> _openWhatsApp() async {
     HapticFeedback.mediumImpact();
     setState(() {
@@ -211,6 +214,7 @@ class _PaymentConfirmationScreenState extends State<PaymentConfirmationScreen>
           "Halo, saya sudah melakukan transfer untuk top up saldo.\n\n"
           "📋 *Detail Transfer:*\n"
           "• NISN: ${widget.nisn}\n"
+          "• Nama Santri: ${widget.namaSantri}\n"
           "• Jumlah Top Up: Rp ${_formatCurrency(widget.amount)}\n"
           "• Kode Unik: $_nisnCode\n"
           "• Total Transfer: Rp ${_formatCurrency(_totalAmount.toString())}\n"
@@ -219,37 +223,106 @@ class _PaymentConfirmationScreenState extends State<PaymentConfirmationScreen>
           "• Bank: BSI (Bank Syariah Indonesia)\n"
           "• No. Rekening: 7269288153\n"
           "• Atas Nama: PESANTREN ISLAM ZAID BIN TSABIT\n\n"
-          "Silakan verifikasi pembayaran saya. Terima kasih.";
+          "Tolong verifikasi pembayaran saya. Terima kasih.";
 
       final encodedMessage = Uri.encodeComponent(message);
-      final whatsappUrl = Uri.parse(
-        "https://wa.me/$phone?text=$encodedMessage",
-      );
 
-      if (!await launchUrl(whatsappUrl, mode: LaunchMode.externalApplication)) {
-        throw 'Tidak bisa buka WhatsApp';
-      } else {
-        // fallback terakhir
-        await launchUrl(
-          Uri.parse(
-            "https://api.whatsapp.com/send?phone=$phone&text=$encodedMessage",
-          ),
-          mode: LaunchMode.externalApplication,
-        );
+      // ✅ Hapus spasi berlebih dan gunakan format yang benar
+      final List<String> whatsappUrls = [
+        'whatsapp://send?phone=$phone&text=$encodedMessage', // Aplikasi lokal
+        'https://wa.me/$phone?text=$encodedMessage', // Web WhatsApp (tanpa spasi!)
+        'https://api.whatsapp.com/send?phone=$phone&text=$encodedMessage',
+      ];
+
+      bool launched = false;
+
+      for (final urlString in whatsappUrls) {
+        try {
+          final uri = Uri.parse(urlString);
+
+          if (await canLaunchUrl(uri)) {
+            launched = await launchUrl(
+              uri,
+              mode: LaunchMode.externalApplication,
+            );
+            if (launched) break;
+          }
+        } catch (e) {
+          print('Gagal membuka: $urlString, Error: $e');
+          continue;
+        }
       }
 
-      await Future.delayed(Duration(seconds: 2));
-      _showSuccessDialog();
+      if (launched) {
+        await Future.delayed(const Duration(milliseconds: 500));
+        _showSuccessDialog();
+      } else {
+        throw 'Tidak dapat membuka WhatsApp. Pastikan aplikasi terinstall.';
+      }
     } catch (e) {
       print('Error opening WhatsApp: $e');
       _showErrorDialog(
-        'Gagal membuka WhatsApp. Silakan hubungi bendahara secara manual.\n\nError: ${e.toString()}',
+        'Gagal membuka WhatsApp. Silakan:\n\n'
+        '1. Pastikan WhatsApp sudah terinstall\n'
+        '2. Coba restart aplikasi\n'
+        '3. Hubungi bendahara secara manual\n\n'
+        'Error: ${e.toString()}',
       );
     } finally {
       setState(() {
         _isProcessing = false;
       });
     }
+  }
+
+  // ALTERNATIVE: Manual WhatsApp launch method (backup)
+  Future<void> _openWhatsAppManual() async {
+    HapticFeedback.mediumImpact();
+
+    final phone = "6289693652230";
+    final message =
+        "Halo, saya sudah melakukan transfer untuk top up saldo.\n\n"
+        "📋 *Detail Transfer:*\n"
+        "• NISN: ${widget.nisn}\n"
+        "• Nama Santri: ${widget.namaSantri}\n"
+        "• Jumlah Top Up: Rp ${_formatCurrency(widget.amount)}\n"
+        "• Kode Unik: $_nisnCode\n"
+        "• Total Transfer: Rp ${_formatCurrency(_totalAmount.toString())}\n"
+        "• Kode Transaksi: $_transactionCode\n\n"
+        "💰 *Detail Rekening Tujuan:*\n"
+        "• Bank: BSI (Bank Syariah Indonesia)\n"
+        "• No. Rekening: 7269288153\n"
+        "• Atas Nama: PESANTREN ISLAM ZAID BIN TSABIT\n\n"
+        "Silakan verifikasi pembayaran saya. Terima kasih.";
+
+    // Copy message to clipboard and show instructions
+    Clipboard.setData(ClipboardData(text: message));
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Buka WhatsApp Manual'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Pesan sudah disalin ke clipboard.'),
+            SizedBox(height: 16),
+            Text('Langkah selanjutnya:'),
+            Text('1. Buka WhatsApp'),
+            Text('2. Cari nomor: $phone'),
+            Text('3. Paste pesan yang sudah disalin'),
+            Text('4. Kirim pesan'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Mengerti'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showErrorDialog(String message) {
@@ -277,7 +350,14 @@ class _PaymentConfirmationScreenState extends State<PaymentConfirmationScreen>
           TextButton(
             onPressed: () {
               Navigator.of(context).pop();
-              _openWhatsApp(); // Coba lagi
+              _openWhatsAppManual(); // Try manual method
+            },
+            child: Text('Buka Manual'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              _openWhatsApp(); // Try again
             },
             child: Text('Coba Lagi'),
           ),
