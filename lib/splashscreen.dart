@@ -1,4 +1,4 @@
-// splashscreen.dart - Fixed Version
+// splashscreen.dart - Debug Version
 import 'package:flutter/material.dart';
 import 'package:molahv2/home.dart';
 import 'package:molahv2/login.dart';
@@ -20,112 +20,167 @@ class _SplashScreenState extends State<SplashScreen>
   late Animation<double> _textAnimation;
 
   String _statusMessage = 'Memulai aplikasi...';
+  String _debugInfo = '';
 
   @override
   void initState() {
     super.initState();
+    print('🚀 SplashScreen initState started');
     _initAnimations();
 
-    // Debug: Check MMKV status immediately
+    // Debug: Check MMKV status immediately with more detailed logging
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      try {
-        final mmkv = MMKV.defaultMMKV();
-        print('🔍 MMKV Debug - All keys: ${mmkv?.allKeys}');
-        print('🔍 MMKV Debug - Count: ${mmkv?.count}');
-      } catch (e) {
-        print('❌ MMKV Debug error: $e');
-      }
+      print('📱 PostFrameCallback triggered');
+      await _debugMMKVDetailed();
+      await _initializeApp();
     });
-
-    _initializeApp();
   }
 
   void _initAnimations() {
-    _logoController = AnimationController(
-      duration: const Duration(milliseconds: 1500),
-      vsync: this,
-    );
+    try {
+      print('🎬 Initializing animations...');
+      _logoController = AnimationController(
+        duration: const Duration(milliseconds: 1500),
+        vsync: this,
+      );
 
-    _textController = AnimationController(
-      duration: const Duration(milliseconds: 1000),
-      vsync: this,
-    );
+      _textController = AnimationController(
+        duration: const Duration(milliseconds: 1000),
+        vsync: this,
+      );
 
-    _logoAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _logoController, curve: Curves.elasticOut),
-    );
+      _logoAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+        CurvedAnimation(parent: _logoController, curve: Curves.elasticOut),
+      );
 
-    _textAnimation = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(CurvedAnimation(parent: _textController, curve: Curves.easeOut));
+      _textAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+        CurvedAnimation(parent: _textController, curve: Curves.easeOut),
+      );
 
-    _logoController.forward();
-    Future.delayed(const Duration(milliseconds: 500), () {
-      _textController.forward();
-    });
+      _logoController.forward();
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (mounted) {
+          _textController.forward();
+        }
+      });
+      print('✅ Animations initialized successfully');
+    } catch (e) {
+      print('❌ Animation initialization error: $e');
+    }
   }
 
-  // Di dalam class _SplashScreenState
-  Future<void> _debugMMKVState() async {
+  Future<void> _debugMMKVDetailed() async {
+    print('🔍 Starting detailed MMKV debug...');
     try {
+      // Check if MMKV is initialized
+      print('🔍 Step 1: Checking MMKV initialization...');
+
       final mmkv = MMKV.defaultMMKV();
       if (mmkv == null) {
-        print('❌ MMKV instance is null in debug');
+        print('❌ MMKV instance is null - not initialized');
+        _updateDebugInfo('MMKV: Not initialized');
         return;
       }
 
-      print('🔍 MMKV DEBUG - All keys: ${mmkv.allKeys}');
-      print('🔍 MMKV DEBUG - Total count: ${mmkv.count}');
+      print('✅ MMKV instance exists');
+      _updateDebugInfo('MMKV: Initialized');
 
-      // Check semua key login
-      final keys = [
+      // Test basic operations
+      print('🔍 Step 2: Testing MMKV basic operations...');
+      try {
+        mmkv.encodeBool('test_splash', true);
+        final testRead = mmkv.decodeBool('test_splash', defaultValue: false);
+        print('✅ MMKV read/write test: $testRead');
+        mmkv.removeValue('test_splash'); // cleanup
+        _updateDebugInfo('MMKV: Read/Write OK');
+      } catch (e) {
+        print('❌ MMKV read/write test failed: $e');
+        _updateDebugInfo('MMKV: R/W Error - $e');
+      }
+
+      // Check existing keys
+      print('🔍 Step 3: Checking existing keys...');
+      final allKeys = mmkv.allKeys;
+      final keyCount = mmkv.count;
+      print('🔍 All keys: $allKeys');
+      print('🔍 Total count: $keyCount');
+      _updateDebugInfo('Keys: $keyCount found');
+
+      // Check login-specific keys
+      final loginKeys = [
         'user_logged_in',
         'user_username',
         'user_login_time',
         'user_data_json',
       ];
-      for (final key in keys) {
+
+      for (final key in loginKeys) {
         if (mmkv.containsKey(key)) {
           if (key == 'user_logged_in') {
             final value = mmkv.decodeBool(key, defaultValue: false);
-            print('🔍 MMKV DEBUG - $key: $value');
+            print('🔍 $key: $value');
           } else {
             final value = mmkv.decodeString(key) ?? 'NULL';
-            print('🔍 MMKV DEBUG - $key: "$value"');
+            print('🔍 $key: "$value"');
           }
         } else {
-          print('🔍 MMKV DEBUG - $key: NOT FOUND');
+          print('🔍 $key: NOT FOUND');
         }
       }
     } catch (e) {
-      print('❌ MMKV debug error: $e');
+      print('❌ MMKV detailed debug error: $e');
+      _updateDebugInfo('MMKV Error: $e');
     }
   }
 
   Future<void> _initializeApp() async {
+    print('🚀 Starting app initialization...');
     try {
       _updateStatus('Menginisialisasi aplikasi...');
+      await Future.delayed(const Duration(seconds: 1));
 
-      // Tunggu minimal 2 detik untuk animasi dan inisialisasi
-      await Future.delayed(const Duration(seconds: 2));
+      if (!mounted) {
+        print('⚠️ Widget not mounted, stopping initialization');
+        return;
+      }
 
-      if (!mounted) return;
+      _updateStatus('Memeriksa MMKV...');
+
+      // Test LoginPreferences health
+      print('🔍 Testing LoginPreferences health...');
+      final isHealthy = await LoginPreferences.checkHealth();
+      print('🔍 LoginPreferences health: $isHealthy');
+      _updateDebugInfo('LoginPrefs: ${isHealthy ? 'OK' : 'Failed'}');
+
+      if (!isHealthy) {
+        print('⚠️ LoginPreferences unhealthy, proceeding to login');
+        await Future.delayed(const Duration(milliseconds: 500));
+        if (mounted) {
+          _navigateToLogin();
+        }
+        return;
+      }
 
       _updateStatus('Memeriksa status login...');
-      await _debugMMKVState();
-      // Gunakan LoginPreferences yang sudah ada
+
+      // Check login status
+      print('🔍 Checking login status...');
       final isLoggedIn = await LoginPreferences.isLoggedIn();
       final username = await LoginPreferences.getUsername();
 
-      debugPrint(
+      print(
         '🔍 Login check result: isLoggedIn=$isLoggedIn, username="$username"',
       );
+      _updateDebugInfo('Login: $isLoggedIn, User: $username');
 
-      if (!mounted) return;
+      if (!mounted) {
+        print('⚠️ Widget not mounted after login check');
+        return;
+      }
 
       if (isLoggedIn && username != null && username.isNotEmpty) {
         _updateStatus('Selamat datang kembali, $username!');
+        print('✅ User is logged in, navigating to home');
         await Future.delayed(const Duration(milliseconds: 800));
 
         if (mounted) {
@@ -133,13 +188,19 @@ class _SplashScreenState extends State<SplashScreen>
         }
       } else {
         _updateStatus('Silakan login...');
+        print('ℹ️ User not logged in, navigating to login');
         await Future.delayed(const Duration(milliseconds: 500));
         if (mounted) {
           _navigateToLogin();
         }
       }
     } catch (e) {
-      debugPrint('💥 Initialization error: $e');
+      print('💥 Initialization error: $e');
+      _updateDebugInfo('Init Error: $e');
+      _updateStatus('Terjadi kesalahan: $e');
+
+      // Fallback: always go to login if error
+      await Future.delayed(const Duration(seconds: 2));
       if (mounted) {
         _navigateToLogin();
       }
@@ -147,36 +208,64 @@ class _SplashScreenState extends State<SplashScreen>
   }
 
   void _updateStatus(String message) {
+    print('📱 Status Update: $message');
     if (mounted) {
       setState(() {
         _statusMessage = message;
       });
-      debugPrint('📱 Status: $message');
+    }
+  }
+
+  void _updateDebugInfo(String info) {
+    print('🐛 Debug Info: $info');
+    if (mounted) {
+      setState(() {
+        _debugInfo = info;
+      });
     }
   }
 
   void _navigateToHome(String username) {
-    debugPrint('🏠 Navigating to HomeScreen for: $username');
+    print('🏠 Navigating to HomeScreen for: $username');
 
-    if (!mounted) return;
+    if (!mounted) {
+      print('⚠️ Widget not mounted, cannot navigate to home');
+      return;
+    }
 
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => HomeScreen(username: username)),
-    );
+    try {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => HomeScreen(username: username)),
+      );
+      print('✅ Navigation to home completed');
+    } catch (e) {
+      print('❌ Navigation to home error: $e');
+      _navigateToLogin(); // fallback
+    }
   }
 
   void _navigateToLogin() {
-    debugPrint('🔐 Navigating to LoginScreen');
+    print('🔐 Navigating to LoginScreen');
 
-    if (!mounted) return;
+    if (!mounted) {
+      print('⚠️ Widget not mounted, cannot navigate to login');
+      return;
+    }
 
-    Navigator.of(
-      context,
-    ).pushReplacement(MaterialPageRoute(builder: (_) => LoginScreen()));
+    try {
+      Navigator.of(
+        context,
+      ).pushReplacement(MaterialPageRoute(builder: (_) => LoginScreen()));
+      print('✅ Navigation to login completed');
+    } catch (e) {
+      print('❌ Navigation to login error: $e');
+      _updateStatus('Error navigasi: $e');
+    }
   }
 
   @override
   void dispose() {
+    print('🗑️ SplashScreen disposing...');
     _logoController.dispose();
     _textController.dispose();
     super.dispose();
@@ -270,6 +359,28 @@ class _SplashScreenState extends State<SplashScreen>
                     textAlign: TextAlign.center,
                   ),
                 ),
+                // Debug info untuk troubleshooting
+                if (_debugInfo.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      'Debug: $_debugInfo',
+                      style: const TextStyle(
+                        color: Colors.white54,
+                        fontSize: 10,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 40),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -279,6 +390,8 @@ class _SplashScreenState extends State<SplashScreen>
                     textAlign: TextAlign.center,
                   ),
                 ),
+
+                // Emergency bypass button untuk debugging
               ],
             ),
           ),

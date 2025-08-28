@@ -1,7 +1,18 @@
--keep class io.flutter.plugin.** { *; }
--keep class io.flutter.plugins.urllauncher.** { *; }
+# Keep MMKV
 -keep class com.tencent.mmkv.** { *; }
--dontwarn com.tencent.mmkv.**
--keep class com.tencent.mmkv.** { *; }
--keep class com.getkeepsafe.relinker.** { *; }
 
+# Keep Flutter classes
+-keep class io.flutter.** { *; }
+-keep class io.flutter.plugins.** { *; }
+
+# Keep Google Play Core (untuk mengatasi error R8)
+-keep class com.google.android.play.core.** { *; }
+-dontwarn com.google.android.play.core.**
+
+# Keep native methods
+-keepclasseswithmembernames class * {
+    native <methods>;
+}
+
+# Keep your app classes
+-keep class com.example.molahv2.** { *; }

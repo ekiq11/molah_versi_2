@@ -1,4 +1,6 @@
-// main.dart
+// ====================
+// 1. MAIN.DART - Perbaikan Inisialisasi
+// ====================
 import 'package:flutter/material.dart';
 import 'package:mmkv/mmkv.dart';
 import 'splashscreen.dart';
@@ -6,14 +8,22 @@ import 'splashscreen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  print('🚀 App starting...');
+
   try {
-    await MMKV.initialize(); // ✅ Ini harus selesai dulu
-    print("✅ MMKV initialized di main.dart");
+    await MMKV.initialize();
+    print('✅ MMKV initialized successfully');
+
+    // Test MMKV immediately
+    final mmkv = MMKV.defaultMMKV();
+    mmkv?.encodeBool('startup_test', true);
+    final test = mmkv?.decodeBool('startup_test', defaultValue: false);
+    print('🔍 MMKV startup test: $test');
   } catch (e) {
-    print("❌ MMKV gagal init: $e");
+    print('❌ MMKV init failed: $e');
   }
 
-  // ✅ Hanya jalankan app setelah MMKV siap
+  print('🚀 Running app...');
   runApp(const MyApp());
 }
 
@@ -25,7 +35,7 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'MOLAH',
       theme: ThemeData(primarySwatch: Colors.red),
-      home: SplashScreen(), // langsung splash
+      home: SplashScreen(),
       debugShowCheckedModeBanner: false,
     );
   }
